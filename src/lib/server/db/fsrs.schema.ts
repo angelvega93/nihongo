@@ -1,11 +1,17 @@
 import { bigint, doublePrecision, integer, jsonb, pgTable, serial, smallint, text, timestamp } from "drizzle-orm/pg-core";
-import { user } from "./auth.schema";
+import { user } from "./auth.schema.ts";
+
+export const NoteType = {
+  Vocabulary: 1,
+  Grammar: 2,
+  Kanji: 3,
+} as const;
 
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  type: smallint("type").default(0).notNull(), // TODO: Define the possible note types (e.g., vocabulary, grammar, kanji)
-  question: text("question").notNull(),
-  answer: text("answer").notNull(),
+  type: smallint("type").default(0).notNull(),
+  question: text("question"),
+  answer: text("answer"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")

@@ -31,8 +31,8 @@ CREATE TABLE "decks" (
 CREATE TABLE "notes" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"type" smallint DEFAULT 0 NOT NULL,
-	"question" text NOT NULL,
-	"answer" text NOT NULL,
+	"question" text,
+	"answer" text,
 	"metadata" jsonb,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL

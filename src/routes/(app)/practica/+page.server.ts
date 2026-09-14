@@ -2,7 +2,8 @@ import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { cards, decks, notes, revLog } from '$lib/server/db/schema';
 import { and, asc, count, eq, gte, lt, ne, or, sql } from 'drizzle-orm';
-import { fsrs, Rating, State, type Card as FsrsCard, type Grade } from 'ts-fsrs';
+import { Rating, State, type Grade } from 'ts-fsrs';
+import { reviewService } from '$lib/server/services/fsrs/review';
 import type { VocabularyMetadata } from '$lib/types/note-metadata';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -39,12 +40,15 @@ export const load: PageServerLoad = async (event) => {
 			difficulty: cards.difficulty,
 			elapsedDays: cards.elapsedDays,
 			scheduledDays: cards.scheduledDays,
+			learningSteps: cards.learningSteps,
 			reps: cards.reps,
 			lapses: cards.lapses,
 			state: cards.state,
 			lastReview: cards.lastReview,
 			deckFsrs: decks.fsrs,
-			rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${cards.deckId}, ${cards.state} ORDER BY ${cards.id})::int`.as('rn'),
+			rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${cards.deckId}, ${cards.state} ORDER BY ${cards.id})::int`.as(
+				'rn'
+			),
 			stateLimit: sql<number>`(CASE ${cards.state}
 				WHEN ${State.New} THEN GREATEST(0, COALESCE((${decks.cardLimit}->>'new')::bigint, 50) - ${todayCount.get(State.New) ?? 0})
 				WHEN ${State.Review} THEN GREATEST(0, COALESCE((${decks.cardLimit}->>'review')::bigint, 9007199254740991) - ${todayCount.get(State.Review) ?? 0})
@@ -76,6 +80,7 @@ export const load: PageServerLoad = async (event) => {
 			difficulty: subQuery.difficulty,
 			elapsedDays: subQuery.elapsedDays,
 			scheduledDays: subQuery.scheduledDays,
+			learningSteps: subQuery.learningSteps,
 			reps: subQuery.reps,
 			lapses: subQuery.lapses,
 			state: subQuery.state,
@@ -93,31 +98,6 @@ export const load: PageServerLoad = async (event) => {
 	};
 };
 
-function toFsrsCard(row: {
-	due: number;
-	stability: number;
-	difficulty: number;
-	elapsedDays: number;
-	scheduledDays: number;
-	reps: number;
-	lapses: number;
-	state: number;
-	lastReview: number | null;
-}): FsrsCard {
-	return {
-		due: new Date(row.due),
-		stability: row.stability,
-		difficulty: row.difficulty,
-		elapsed_days: row.elapsedDays,
-		scheduled_days: row.scheduledDays,
-		learning_steps: 0,
-		reps: row.reps,
-		lapses: row.lapses,
-		state: row.state,
-		last_review: row.lastReview ? new Date(row.lastReview) : undefined
-	};
-}
-
 export const actions: Actions = {
 	review: async (event) => {
 		const userId = event.locals.user?.id;
@@ -127,59 +107,77 @@ export const actions: Actions = {
 		const cardId = Number(formData.get('cardId'));
 		const grade = Number(formData.get('grade')) as Grade;
 		const duration = Number(formData.get('duration') ?? 0);
+		const offset = -new Date().getTimezoneOffset();
 
 		if (!cardId || !GRADES.includes(grade)) {
 			return fail(400, { message: 'Datos inválidos' });
 		}
 
-		const [existing] = await db
-			.select({ card: cards, deckFsrs: decks.fsrs })
-			.from(cards)
-			.innerJoin(decks, eq(decks.id, cards.deckId))
-			.where(and(eq(cards.id, cardId), eq(cards.userId, userId)));
-
-		if (!existing) return fail(404, { message: 'Tarjeta no encontrada' });
-
-		const now = new Date();
-		const { card, log } = fsrs(existing.deckFsrs ?? undefined).next(
-			toFsrsCard(existing.card),
-			now,
-			grade
-		);
-
-		await db.transaction(async (tx) => {
-			await tx
-				.update(cards)
-				.set({
-					due: card.due.getTime(),
-					stability: card.stability,
-					difficulty: card.difficulty,
-					elapsedDays: card.elapsed_days,
-					scheduledDays: card.scheduled_days,
-					reps: card.reps,
-					lapses: card.lapses,
-					state: card.state,
-					lastReview: card.last_review ? card.last_review.getTime() : null
-				})
-				.where(eq(cards.id, cardId));
-
-			await tx.insert(revLog).values({
-				userId,
-				cardId,
-				grade: log.rating,
-				state: log.state,
-				due: log.due.getTime(),
-				stability: log.stability,
-				difficulty: log.difficulty,
-				elapsedDays: log.elapsed_days,
-				lastElapsedDays: log.last_elapsed_days,
-				scheduledDays: log.scheduled_days,
-				learningSteps: log.learning_steps,
-				review: log.review.getTime(),
-				duration
+		try {
+			const result = await reviewService.next(userId, cardId, Date.now(), grade, {
+				duration,
+				offset
 			});
-		});
+			return { success: true, ...result };
+		} catch {
+			return fail(404, { message: 'Tarjeta no encontrada' });
+		}
+	},
 
-		return { success: true };
+	/** Revert the most recent review of a card. */
+	undo: async (event) => {
+		const userId = event.locals.user?.id;
+		if (!userId) return fail(401, { message: 'No autenticado' });
+
+		const formData = await event.request.formData();
+		const cardId = Number(formData.get('cardId'));
+		const logId = Number(formData.get('logId'));
+
+		if (!cardId || !logId) return fail(400, { message: 'Datos inválidos' });
+
+		try {
+			const result = await reviewService.undo(userId, cardId, logId);
+			return { success: true, ...result };
+		} catch {
+			return fail(404, { message: 'No se pudo deshacer el repaso.' });
+		}
+	},
+
+	/** Reset a card back to the New state. */
+	forget: async (event) => {
+		const userId = event.locals.user?.id;
+		if (!userId) return fail(401, { message: 'No autenticado' });
+
+		const formData = await event.request.formData();
+		const cardId = Number(formData.get('cardId'));
+		const resetCount = formData.get('resetCount') === 'true';
+
+		if (!cardId) return fail(400, { message: 'Datos inválidos' });
+
+		try {
+			const result = await reviewService.forget(userId, cardId, Date.now(), resetCount);
+			return { success: true, ...result };
+		} catch {
+			return fail(404, { message: 'Tarjeta no encontrada' });
+		}
+	},
+
+	/** Toggle the suspended flag of a card. */
+	suspend: async (event) => {
+		const userId = event.locals.user?.id;
+		if (!userId) return fail(401, { message: 'No autenticado' });
+
+		const formData = await event.request.formData();
+		const cardId = Number(formData.get('cardId'));
+		const suspended = formData.get('suspended') === 'true';
+
+		if (!cardId) return fail(400, { message: 'Datos inválidos' });
+
+		try {
+			const result = await reviewService.switchSuspend(userId, cardId, suspended);
+			return { success: true, ...result };
+		} catch {
+			return fail(404, { message: 'Tarjeta no encontrada' });
+		}
 	}
 };

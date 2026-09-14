@@ -12,11 +12,9 @@
 	import FuriganaText from '$lib/components/furigana-text.svelte';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import UndoIcon from '@lucide/svelte/icons/undo-2';
-	import ClockIcon from '@lucide/svelte/icons/clock';
 	import { Rating, State, show_diff_message, type Grade } from 'ts-fsrs';
 	import { rowToFsrsCard } from '$lib/fsrs/card';
 	import { createReviewSnapshot } from '$lib/fsrs/preview';
-	import { Ticker } from '$lib/hooks/ticker.svelte';
 	import { untrack } from 'svelte';
 	import type { PageData } from './$types';
 
@@ -32,8 +30,25 @@
 		suspended?: boolean;
 	};
 
-	let queue = $state<DueCard[]>(untrack(() => [...data.dueCards]));
+	/** The three practice boxes, mirroring the NextJS `noteBox` shape. */
+	type StateBox = typeof State.New | typeof State.Learning | typeof State.Review;
+
+	/**
+	 * Cards grouped by state. Learning and Relearning share the same box, since
+	 * both are short-term steps. Mirrors `useCardBoxes`.
+	 */
+	let boxes = $state<Record<StateBox, DueCard[]>>(
+		untrack(() => ({
+			[State.New]: data.dueCards.filter((card) => card.state === State.New),
+			[State.Learning]: data.dueCards.filter(
+				(card) => card.state === State.Learning || card.state === State.Relearning
+			),
+			[State.Review]: data.dueCards.filter((card) => card.state === State.Review)
+		}))
+	);
 	const total = untrack(() => data.dueCards.length);
+	/** Box currently being reviewed, mirroring `currentType`. */
+	let currentType = $state<StateBox>(untrack(() => initialType(boxes)));
 	let revealed = $state(false);
 	let shownAt = $state(Date.now());
 	let submitting = $state(false);
@@ -42,30 +57,30 @@
 	let lastCard = $state<DueCard>();
 	/** Id of the review log created for `lastCard`, used to roll it back. */
 	let lastLogId = $state<number>();
-	/** Ticking clock so learning cards re-appear once their `due` is reached. */
-	const clock = new Ticker();
-	const now = $derived(clock.now);
-	/** Number of cards that graduated out of the queue during this session. */
+	/** Number of cards that left the session for good. */
 	let completed = $state(0);
 
-	// A card becomes "due" when its scheduled date is reached. Learning and
-	// Relearning cards are scheduled a few minutes ahead, so they stay in the
-	// queue and come back automatically instead of being dropped.
-	const current = $derived(queue.find((card) => card.due <= now));
-	const remaining = $derived(queue.length);
-	const done = $derived(remaining === 0);
-	/** There are still cards, but none is due right now. */
-	const waiting = $derived(!done && !current);
-	const nextDue = $derived(waiting ? Math.min(...queue.map((card) => card.due)) : 0);
+	/** Pick the first non-empty box, starting at New. Mirrors `useCardBoxes`. */
+	function initialType(boxes: Record<StateBox, DueCard[]>): StateBox {
+		let type: StateBox = State.New;
+		for (let i = 0; i < 3; i++) {
+			if (boxes[type].length > 0) break;
+			type = ((type + 1) % 3) as StateBox;
+		}
+		return type;
+	}
 
-	/** Number of cards left in each FSRS state. Learning and Relearning are
-	 * grouped together, since both represent short-term steps. */
+	const current = $derived(boxes[currentType][0]);
+	const remaining = $derived(
+		boxes[State.New].length + boxes[State.Learning].length + boxes[State.Review].length
+	);
+	const done = $derived(remaining === 0);
+
+	/** Number of cards left in each box. */
 	const stateCounts = $derived({
-		new: queue.filter((card) => card.state === State.New).length,
-		learning: queue.filter(
-			(card) => card.state === State.Learning || card.state === State.Relearning
-		).length,
-		review: queue.filter((card) => card.state === State.Review).length
+		new: boxes[State.New].length,
+		learning: boxes[State.Learning].length,
+		review: boxes[State.Review].length
 	});
 
 	const snapshot = $derived(
@@ -74,12 +89,41 @@
 	const preview = $derived(snapshot?.preview);
 	const dsr = $derived(snapshot?.DSR);
 
-	// Only poll the clock while there is nothing left to review right now.
-	$effect(() => {
-		if (!waiting) return;
-		clock.start();
-		return () => clock.stop();
-	});
+	/**
+	 * Decide which box to show next, given the current one. Mirrors
+	 * `updateStateBox` from the NextJS implementation.
+	 */
+	function nextType(type: StateBox): StateBox {
+		let next: StateBox;
+		if (type === State.New) {
+			if (boxes[State.Learning].length > 0) next = State.Learning;
+			else if (boxes[State.Review].length > 0) next = State.Review;
+			else next = State.New;
+		} else if (type === State.Learning) {
+			if (boxes[State.Review].length > 0) next = State.Review;
+			else if (boxes[State.New].length > 0) next = State.New;
+			else next = State.Learning;
+		} else {
+			// State.Review
+			if (boxes[State.Learning].length > 0) next = State.Learning;
+			else if (boxes[State.New].length > 0) next = State.New;
+			else next = State.Review;
+		}
+
+		// A learning card may still be a few minutes away from its due date.
+		// Rather than showing it early, fall back to another available box,
+		// mirroring the `randomNewOrReviewState` fallback in the reference.
+		if (
+			next === State.Learning &&
+			boxes[State.Learning].length > 0 &&
+			boxes[State.Learning][0].due - Date.now() > 0
+		) {
+			if (boxes[State.New].length > 0) return State.New;
+			if (boxes[State.Review].length > 0) return State.Review;
+		}
+
+		return next;
+	}
 
 	const gradeButtons = [
 		{ grade: Rating.Again, label: 'Otra vez', class: 'bg-rose-600 hover:bg-rose-500', key: '1' },
@@ -99,11 +143,11 @@
 	}
 
 	/**
-	 * Apply the outcome of a review to the local queue.
+	 * Apply the outcome of a review to the local boxes.
 	 *
-	 * Cards in Learning/Relearning are scheduled a few minutes ahead by FSRS, so
-	 * they are kept in the queue and re-appear once their `due` is reached.
-	 * Cards that graduate to Review (or get suspended) leave the queue.
+	 * Mirrors `handleChange` from the NextJS implementation: the reviewed card
+	 * leaves its box, and if it is still in a short-term state it is appended to
+	 * the Learning box so it comes back later in the session.
 	 */
 	function afterReview(result: ReviewResult) {
 		const card = current;
@@ -113,28 +157,25 @@
 		lastLogId = result.lid;
 
 		const nextState = result.next_state;
-		const staysInQueue =
-			!result.suspended &&
-			nextState !== undefined &&
-			nextState !== State.Review &&
-			nextState !== State.New;
+		const updated = boxes[currentType].slice(1);
 
-		if (staysInQueue) {
-			queue = queue
-				.map((item) =>
-					item.id === card.id
-						? { ...item, state: nextState, due: result.next_due ?? item.due }
-						: item
-				)
-				.sort((a, b) => a.due - b.due);
+		if (nextState !== undefined && nextState !== State.Review && !result.suspended) {
+			// Still learning: keep it around, scheduled a few minutes ahead.
+			const moved = { ...card, state: nextState, due: result.next_due ?? card.due };
+			if (currentType === State.Learning) {
+				boxes[currentType] = [...updated, moved];
+			} else {
+				boxes[currentType] = updated;
+				boxes[State.Learning] = [...boxes[State.Learning], moved];
+			}
 		} else {
-			queue = queue.filter((item) => item.id !== card.id);
+			boxes[currentType] = updated;
 			completed += 1;
 		}
 
 		revealed = false;
 		shownAt = Date.now();
-		clock.start();
+		currentType = nextType(currentType);
 	}
 
 	async function undo() {
@@ -145,23 +186,21 @@
 		const response = await fetch('?/undo', { method: 'POST', body: formData });
 		const result = await response.json();
 		if (result?.type === 'success') {
-			queue = [lastCard, ...queue.filter((item) => item.id !== lastCard!.id)].sort(
-				(a, b) => a.due - b.due
-			);
+			const restored = lastCard;
+			// Put it back at the front of its original box.
+			const box: StateBox =
+				restored.state === State.Review
+					? State.Review
+					: restored.state === State.New
+						? State.New
+						: State.Learning;
+			boxes[box] = [restored, ...boxes[box].filter((item) => item.id !== restored.id)];
 			lastCard = undefined;
 			lastLogId = undefined;
 			revealed = false;
 			shownAt = Date.now();
-			clock.start();
+			currentType = box;
 		}
-	}
-
-	/** Time left until the next card becomes due, as a short label. */
-	function waitLabel() {
-		if (!nextDue) return '';
-		const seconds = Math.max(0, Math.round((nextDue - now) / 1000));
-		if (seconds < 60) return `${seconds}s`;
-		return `${Math.ceil(seconds / 60)} min`;
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -239,19 +278,6 @@
 			<Empty.Content>
 				<Button href="/">Volver al resumen</Button>
 			</Empty.Content>
-		</Empty.Root>
-	{:else if waiting}
-		<Empty.Root>
-			<Empty.Header>
-				<Empty.Media variant="icon">
-					<ClockIcon />
-				</Empty.Media>
-				<Empty.Title>Tarjetas en aprendizaje</Empty.Title>
-				<Empty.Description>
-					La siguiente tarjeta estará lista en {waitLabel()}. Las tarjetas nuevas se programan unos
-					minutos después de fallarlas para reforzar la memoria.
-				</Empty.Description>
-			</Empty.Header>
 		</Empty.Root>
 	{:else if current}
 		<Card.Root class="min-h-80 justify-center">

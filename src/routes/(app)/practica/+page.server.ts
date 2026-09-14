@@ -1,19 +1,36 @@
 import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { cards, decks, notes, revLog } from '$lib/server/db/schema';
-import { and, asc, eq, lte } from 'drizzle-orm';
-import { fsrs, Rating, type Card as FsrsCard, type Grade } from 'ts-fsrs';
+import { and, asc, count, eq, gte, lt, ne, or, sql } from 'drizzle-orm';
+import { fsrs, Rating, State, type Card as FsrsCard, type Grade } from 'ts-fsrs';
 import type { VocabularyMetadata } from '$lib/types/note-metadata';
 import type { Actions, PageServerLoad } from './$types';
 
-const SESSION_LIMIT = 20;
 const GRADES = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy] as const;
+
+// Study day starts at 4am, so late-night reviews count towards the previous day.
+function startOfStudyDay(now: Date): Date {
+	const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 4, 0, 0, 0);
+	if (now.getHours() < 4) start.setDate(start.getDate() - 1);
+	return start;
+}
 
 export const load: PageServerLoad = async (event) => {
 	const userId = event.locals.user!.id;
-	const now = Date.now();
+	const now = new Date();
+	const startOfDay = startOfStudyDay(now);
 
-	const dueCards = await db
+	const todayCounts = await db
+		.select({ state: revLog.state, value: count() })
+		.from(revLog)
+		.where(and(eq(revLog.userId, userId), gte(revLog.review, startOfDay.getTime())))
+		.groupBy(revLog.state);
+
+	const todayCount = new Map<number, number>(
+		todayCounts.map((row) => [row.state, Number(row.value)])
+	);
+
+	const subQuery = db
 		.select({
 			id: cards.id,
 			noteId: cards.noteId,
@@ -26,15 +43,50 @@ export const load: PageServerLoad = async (event) => {
 			lapses: cards.lapses,
 			state: cards.state,
 			lastReview: cards.lastReview,
-			metadata: notes.metadata,
-			deckFsrs: decks.fsrs
+			deckFsrs: decks.fsrs,
+			rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${cards.deckId}, ${cards.state} ORDER BY ${cards.id})::int`.as('rn'),
+			stateLimit: sql<number>`(CASE ${cards.state}
+				WHEN ${State.New} THEN GREATEST(0, COALESCE((${decks.cardLimit}->>'new')::bigint, 50) - ${todayCount.get(State.New) ?? 0})
+				WHEN ${State.Review} THEN GREATEST(0, COALESCE((${decks.cardLimit}->>'review')::bigint, 9007199254740991) - ${todayCount.get(State.Review) ?? 0})
+				WHEN ${State.Learning} THEN GREATEST(0, COALESCE((${decks.cardLimit}->>'learning')::bigint, 9007199254740991) - ${todayCount.get(State.Learning) ?? 0})
+				WHEN ${State.Relearning} THEN GREATEST(0, COALESCE((${decks.cardLimit}->>'learning')::bigint, 9007199254740991) - ${todayCount.get(State.Relearning) ?? 0})
+			END)::bigint`.as('state_limit')
 		})
 		.from(cards)
-		.innerJoin(notes, eq(notes.id, cards.noteId))
 		.innerJoin(decks, eq(decks.id, cards.deckId))
-		.where(and(eq(cards.userId, userId), eq(cards.suspended, 0), eq(cards.deleted, 0), lte(cards.due, now)))
-		.orderBy(asc(cards.due))
-		.limit(SESSION_LIMIT);
+		.where(
+			and(
+				eq(cards.userId, userId),
+				eq(cards.deleted, 0),
+				eq(cards.suspended, 0),
+				or(
+					and(eq(cards.state, State.Review), lt(cards.due, now.getTime())),
+					ne(cards.state, State.Review)
+				)
+			)
+		)
+		.as('sub');
+
+	const dueCards = await db
+		.select({
+			id: subQuery.id,
+			noteId: subQuery.noteId,
+			due: subQuery.due,
+			stability: subQuery.stability,
+			difficulty: subQuery.difficulty,
+			elapsedDays: subQuery.elapsedDays,
+			scheduledDays: subQuery.scheduledDays,
+			reps: subQuery.reps,
+			lapses: subQuery.lapses,
+			state: subQuery.state,
+			lastReview: subQuery.lastReview,
+			deckFsrs: subQuery.deckFsrs,
+			metadata: notes.metadata
+		})
+		.from(subQuery)
+		.innerJoin(notes, eq(notes.id, subQuery.noteId))
+		.where(sql`${subQuery.rn} <= ${subQuery.stateLimit}`)
+		.orderBy(asc(subQuery.state), asc(subQuery.due));
 
 	return {
 		dueCards: dueCards.map((row) => ({ ...row, metadata: row.metadata as VocabularyMetadata }))

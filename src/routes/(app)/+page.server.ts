@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { auth } from '$lib/server/auth';
 import { db } from '$lib/server/db';
-import { cards, decks, notes, NoteType } from '$lib/server/db/schema';
+import { cards, decks, notes, NoteType, cardLimitSchema } from '$lib/server/db/schema';
 import { and, count, eq, notInArray } from 'drizzle-orm';
 import { createEmptyCard, generatorParameters } from 'ts-fsrs';
 import type { Actions, PageServerLoad } from './$types';
@@ -44,7 +44,8 @@ export const actions: Actions = {
 						userId,
 						name: DEFAULT_DECK_NAME,
 						type: NoteType.Vocabulary,
-						fsrs: generatorParameters()
+						fsrs: generatorParameters(),
+						cardLimit: cardLimitSchema.parse({})
 					})
 					.returning({ id: decks.id })
 			)[0].id;

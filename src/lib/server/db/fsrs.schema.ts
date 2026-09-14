@@ -1,5 +1,6 @@
 import { bigint, doublePrecision, integer, jsonb, pgTable, serial, smallint, text, timestamp } from "drizzle-orm/pg-core";
 import type { FSRSParameters } from "ts-fsrs";
+import { z } from "zod";
 import { user } from "./auth.schema.ts";
 
 export const NoteType = {
@@ -7,6 +8,15 @@ export const NoteType = {
   Grammar: 2,
   Kanji: 3,
 } as const;
+
+export const cardLimitSchema = z.object({
+  new: z.number().min(0).optional().default(50),
+  review: z.number().min(0).optional().default(Number.MAX_SAFE_INTEGER),
+  learning: z.number().min(0).optional().default(Number.MAX_SAFE_INTEGER),
+  suspended: z.number().min(1).optional().default(8),
+});
+
+export type CardLimit = z.infer<typeof cardLimitSchema>;
 
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
@@ -30,7 +40,7 @@ export const decks = pgTable("decks", {
   type: smallint("type").notNull(),
   // FSRS parameters for this deck, including learning_steps / relearning_steps.
   fsrs: jsonb("fsrs").$type<FSRSParameters>(),
-  cardLimit: jsonb("card_limit"),
+  cardLimit: jsonb("card_limit").$type<CardLimit>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()

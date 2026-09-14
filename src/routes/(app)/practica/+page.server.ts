@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
-import { cards, notes, revLog } from '$lib/server/db/schema';
+import { cards, decks, notes, revLog } from '$lib/server/db/schema';
 import { and, asc, eq, lte } from 'drizzle-orm';
 import { fsrs, Rating, type Card as FsrsCard, type Grade } from 'ts-fsrs';
 import type { VocabularyMetadata } from '$lib/types/note-metadata';
@@ -22,15 +22,16 @@ export const load: PageServerLoad = async (event) => {
 			difficulty: cards.difficulty,
 			elapsedDays: cards.elapsedDays,
 			scheduledDays: cards.scheduledDays,
-			learningSteps: cards.learningSteps,
 			reps: cards.reps,
 			lapses: cards.lapses,
 			state: cards.state,
 			lastReview: cards.lastReview,
-			metadata: notes.metadata
+			metadata: notes.metadata,
+			deckFsrs: decks.fsrs
 		})
 		.from(cards)
 		.innerJoin(notes, eq(notes.id, cards.noteId))
+		.innerJoin(decks, eq(decks.id, cards.deckId))
 		.where(and(eq(cards.userId, userId), eq(cards.suspended, 0), eq(cards.deleted, 0), lte(cards.due, now)))
 		.orderBy(asc(cards.due))
 		.limit(SESSION_LIMIT);
@@ -46,7 +47,6 @@ function toFsrsCard(row: {
 	difficulty: number;
 	elapsedDays: number;
 	scheduledDays: number;
-	learningSteps: number;
 	reps: number;
 	lapses: number;
 	state: number;
@@ -58,7 +58,7 @@ function toFsrsCard(row: {
 		difficulty: row.difficulty,
 		elapsed_days: row.elapsedDays,
 		scheduled_days: row.scheduledDays,
-		learning_steps: row.learningSteps,
+		learning_steps: 0,
 		reps: row.reps,
 		lapses: row.lapses,
 		state: row.state,
@@ -81,14 +81,19 @@ export const actions: Actions = {
 		}
 
 		const [existing] = await db
-			.select()
+			.select({ card: cards, deckFsrs: decks.fsrs })
 			.from(cards)
+			.innerJoin(decks, eq(decks.id, cards.deckId))
 			.where(and(eq(cards.id, cardId), eq(cards.userId, userId)));
 
 		if (!existing) return fail(404, { message: 'Tarjeta no encontrada' });
 
 		const now = new Date();
-		const { card, log } = fsrs().next(toFsrsCard(existing), now, grade);
+		const { card, log } = fsrs(existing.deckFsrs ?? undefined).next(
+			toFsrsCard(existing.card),
+			now,
+			grade
+		);
 
 		await db.transaction(async (tx) => {
 			await tx
@@ -99,7 +104,6 @@ export const actions: Actions = {
 					difficulty: card.difficulty,
 					elapsedDays: card.elapsed_days,
 					scheduledDays: card.scheduled_days,
-					learningSteps: card.learning_steps,
 					reps: card.reps,
 					lapses: card.lapses,
 					state: card.state,

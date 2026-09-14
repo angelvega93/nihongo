@@ -1,4 +1,5 @@
 import { bigint, doublePrecision, integer, jsonb, pgTable, serial, smallint, text, timestamp } from "drizzle-orm/pg-core";
+import type { FSRSParameters } from "ts-fsrs";
 import { user } from "./auth.schema.ts";
 
 export const NoteType = {
@@ -27,7 +28,8 @@ export const decks = pgTable("decks", {
     .references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   type: smallint("type").notNull(),
-  fsrs: jsonb("fsrs"),
+  // FSRS parameters for this deck, including learning_steps / relearning_steps.
+  fsrs: jsonb("fsrs").$type<FSRSParameters>(),
   cardLimit: jsonb("card_limit"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
@@ -41,6 +43,9 @@ export const cards = pgTable("cards", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+  deckId: integer("deck_id")
+    .notNull()
+    .references(() => decks.id, { onDelete: "cascade" }),
   noteId: integer("note_id")
     .notNull()
     .references(() => notes.id, { onDelete: "cascade" }),
@@ -49,7 +54,6 @@ export const cards = pgTable("cards", {
   difficulty: doublePrecision("difficulty").notNull(),
   elapsedDays: integer("elapsed_days").notNull(),
   scheduledDays: integer("scheduled_days").notNull(),
-  learningSteps: integer("learning_steps").notNull(),
   reps: integer("reps").notNull(),
   lapses: integer("lapses").notNull(),
   state: smallint("state").notNull(),

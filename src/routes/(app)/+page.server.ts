@@ -1,10 +1,12 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { auth } from '$lib/server/auth';
 import { db } from '$lib/server/db';
-import { cards, notes } from '$lib/server/db/schema';
-import { count, eq, notInArray } from 'drizzle-orm';
-import { createEmptyCard } from 'ts-fsrs';
+import { cards, decks, notes, NoteType } from '$lib/server/db/schema';
+import { and, count, eq, notInArray } from 'drizzle-orm';
+import { createEmptyCard, generatorParameters } from 'ts-fsrs';
 import type { Actions, PageServerLoad } from './$types';
+
+const DEFAULT_DECK_NAME = 'Mi vocabulario';
 
 export const load: PageServerLoad = async (event) => {
 	const userId = event.locals.user!.id;
@@ -28,6 +30,25 @@ export const actions: Actions = {
 		const userId = event.locals.user?.id;
 		if (!userId) return fail(401, { message: 'No autenticado' });
 
+		const [deck] = await db
+			.select({ id: decks.id })
+			.from(decks)
+			.where(and(eq(decks.userId, userId), eq(decks.name, DEFAULT_DECK_NAME)));
+
+		const deckId =
+			deck?.id ??
+			(
+				await db
+					.insert(decks)
+					.values({
+						userId,
+						name: DEFAULT_DECK_NAME,
+						type: NoteType.Vocabulary,
+						fsrs: generatorParameters()
+					})
+					.returning({ id: decks.id })
+			)[0].id;
+
 		const existingNoteIds = db
 			.select({ noteId: cards.noteId })
 			.from(cards)
@@ -47,13 +68,13 @@ export const actions: Actions = {
 			const card = createEmptyCard(now);
 			return {
 				userId,
+				deckId,
 				noteId,
 				due: card.due.getTime(),
 				stability: card.stability,
 				difficulty: card.difficulty,
 				elapsedDays: card.elapsed_days,
 				scheduledDays: card.scheduled_days,
-				learningSteps: card.learning_steps,
 				reps: card.reps,
 				lapses: card.lapses,
 				state: card.state,

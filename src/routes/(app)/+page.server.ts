@@ -1,6 +1,21 @@
-import { redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { auth } from '$lib/server/auth';
-import type { Actions } from './$types';
+import { db } from '$lib/server/db';
+import { cards, notes } from '$lib/server/db/schema';
+import { count, eq, notInArray } from 'drizzle-orm';
+import { createEmptyCard } from 'ts-fsrs';
+import type { Actions, PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async (event) => {
+	const userId = event.locals.user!.id;
+
+	const [[{ value: notesCount }], [{ value: cardsCount }]] = await Promise.all([
+		db.select({ value: count() }).from(notes),
+		db.select({ value: count() }).from(cards).where(eq(cards.userId, userId))
+	]);
+
+	return { notesCount, cardsCount };
+};
 
 export const actions: Actions = {
 	signOut: async (event) => {
@@ -8,5 +23,46 @@ export const actions: Actions = {
 			headers: event.request.headers
 		});
 		return redirect(302, '/login');
+	},
+	initializeCards: async (event) => {
+		const userId = event.locals.user?.id;
+		if (!userId) return fail(401, { message: 'No autenticado' });
+
+		const existingNoteIds = db
+			.select({ noteId: cards.noteId })
+			.from(cards)
+			.where(eq(cards.userId, userId));
+
+		const pendingNotes = await db
+			.select({ id: notes.id })
+			.from(notes)
+			.where(notInArray(notes.id, existingNoteIds));
+
+		if (pendingNotes.length === 0) {
+			return { message: 'Ya tienes tarjetas para todas las notas.', created: 0 };
+		}
+
+		const now = new Date();
+		const values = pendingNotes.map(({ id: noteId }) => {
+			const card = createEmptyCard(now);
+			return {
+				userId,
+				noteId,
+				due: card.due.getTime(),
+				stability: card.stability,
+				difficulty: card.difficulty,
+				elapsedDays: card.elapsed_days,
+				scheduledDays: card.scheduled_days,
+				learningSteps: card.learning_steps,
+				reps: card.reps,
+				lapses: card.lapses,
+				state: card.state,
+				lastReview: card.last_review ? card.last_review.getTime() : null
+			};
+		});
+
+		await db.insert(cards).values(values);
+
+		return { message: `Se crearon ${values.length} tarjetas nuevas.`, created: values.length };
 	}
 };

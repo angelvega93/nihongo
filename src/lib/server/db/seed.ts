@@ -1,23 +1,10 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { notes, NoteType } from "./fsrs.schema.ts";
+import type { VocabularyMetadata } from "../../types/note-metadata.ts";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error("DATABASE_URL is not set");
-
-type VocabularySentence = {
-	sentence: string;
-	meaning: string;
-	furigana: string;
-};
-
-type VocabularyMetadata = {
-	word: string;
-	word_reading: string;
-	word_meaning: string;
-	word_furigana: string;
-	word_sentences: VocabularySentence[];
-};
 
 const vocabulary: VocabularyMetadata[] = [
 	{

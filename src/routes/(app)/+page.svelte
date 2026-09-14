@@ -14,12 +14,14 @@
 	import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
 	import ClockIcon from "@lucide/svelte/icons/clock";
 	import SparklesIcon from "@lucide/svelte/icons/sparkles";
-	import type { PageData } from "./$types";
+	import LayersIcon from "@lucide/svelte/icons/layers";
+	import type { ActionData, PageData } from "./$types";
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const firstName = $derived(data.user.name?.split(" ")[0] ?? data.user.name);
 	const initial = $derived((data.user.name?.[0] ?? "?").toUpperCase());
+	let initializingCards = $state(false);
 
 	const learningPath = [
 		{ label: "学", title: "Japanese Beginner", subtitle: "Your published course", progress: 0 },
@@ -92,7 +94,31 @@
 			</h1>
 			<p class="text-sm text-muted-foreground">A little practice today keeps your Japanese moving forward.</p>
 		</div>
-		<Button variant="outline">View progress</Button>
+		<div class="flex flex-col items-end gap-1.5">
+			<div class="flex items-center gap-2">
+				<form
+					method="post"
+					action="?/initializeCards"
+					use:enhance={() => {
+						initializingCards = true;
+						return async ({ update }) => {
+							initializingCards = false;
+							await update();
+						};
+					}}
+				>
+					<Button type="submit" variant="outline" disabled={initializingCards}>
+						<LayersIcon data-icon="inline-start" />
+						{initializingCards ? "Inicializando…" : "Inicializar tarjetas"}
+					</Button>
+				</form>
+				<Button variant="outline">View progress</Button>
+			</div>
+			<p class="text-xs text-muted-foreground">{data.cardsCount} / {data.notesCount} tarjetas listas</p>
+			{#if form?.message}
+				<p class="text-xs font-medium text-orange-500">{form.message}</p>
+			{/if}
+		</div>
 	</div>
 
 	<div class="grid gap-4 lg:grid-cols-3">

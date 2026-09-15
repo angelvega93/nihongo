@@ -9,3 +9,4 @@ export const task = pgTable('task', {
 export * from './auth.schema';
 export * from './fsrs.schema';
 export * from './course.schema';
+export * from './dictionary.schema';

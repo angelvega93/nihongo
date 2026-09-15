@@ -24,3 +24,7 @@ vite.config.ts.timestamp-*
 # Paraglide
 src/lib/paraglide
 project.inlang/cache/
+
+# Dictionary dump (large NDJSON files, imported with pnpm db:import:dictionary)
+data/
+*.ndjson

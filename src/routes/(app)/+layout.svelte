@@ -1,23 +1,22 @@
 <script lang="ts">
-	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { page } from '$app/state';
+	import { Badge } from '$lib/components/ui/badge/index.js';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
-	import HomeIcon from '@lucide/svelte/icons/home';
-	import PencilIcon from '@lucide/svelte/icons/pencil';
-	import ListChecksIcon from '@lucide/svelte/icons/list-checks';
-	import GraduationCapIcon from '@lucide/svelte/icons/graduation-cap';
-	import LayersIcon from '@lucide/svelte/icons/layers';
 	import FlameIcon from '@lucide/svelte/icons/flame';
+	import GraduationCapIcon from '@lucide/svelte/icons/graduation-cap';
+	import HomeIcon from '@lucide/svelte/icons/home';
+	import LayersIcon from '@lucide/svelte/icons/layers';
+	import ListChecksIcon from '@lucide/svelte/icons/list-checks';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
 
 	const navItems = [
 		{ label: 'Resumen', icon: HomeIcon, href: '/' },
-		{ label: 'Aprender', icon: PencilIcon, href: '/aprender' },
-		{ label: 'Práctica', icon: ListChecksIcon, href: '/practica', badge: 7 },
 		{ label: 'Cursos', icon: GraduationCapIcon, href: '/cursos' },
-		{ label: 'Decks', icon: LayersIcon, href: '/decks' }
+		{ label: 'Práctica', icon: ListChecksIcon, href: '/practica', badge: 7 },
+		{ label: 'Decks', icon: LayersIcon, href: '/decks' },
+		{ label: 'Diccionario', icon: BookOpenIcon, href: '/diccionario' }
 	];
 
 	/** A nav item is active when the current path is its href or a child route. */

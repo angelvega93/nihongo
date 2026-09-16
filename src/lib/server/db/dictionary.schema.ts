@@ -74,6 +74,11 @@ export const dictionaryTerms = pgTable(
 			sql`to_tsvector('simple', ${table.searchText})`
 		),
 		index('dictionary_terms_headword_idx').on(table.headword),
+		// `text_pattern_ops` lets `headword LIKE '食%'` use the index. Placed on the
+		// table so the catalog can be browsed by frequency without a full sort.
+		index('dictionary_terms_headword_prefix_idx').on(table.headword.op('text_pattern_ops')),
+		// Lets the catalog be browsed by corpus frequency without a full sort.
+		index('dictionary_terms_frequency_rank_idx').on(sql`((${table.frequencies}->0->>'rank')::int)`),
 		index('dictionary_terms_dictionary_idx').on(table.dictionary)
 	]
 );

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@nikkei/napi-sudachi':
+        specifier: ^0.12.0
+        version: 0.12.0
       ts-fsrs:
         specifier: ^5.4.2
         version: 5.4.2
@@ -994,6 +997,40 @@ packages:
   '@mrleebo/prisma-ast@0.16.0':
     resolution: {integrity: sha512-a9ELYNIflEQP38tSu6gnUgSAWgXjuhMvC52868K5sWgyRmYsjiJMWTUmm8iy7hZT5EN2ZKVydMTFP2q3/+6ccg==}
     engines: {node: '>=22.0.0'}
+
+  '@nikkei/napi-sudachi-darwin-arm64@0.12.0':
+    resolution: {integrity: sha512-vyDg3tCFzBgQ3LQbSs42KG9I8LrhKu1qNnjgA7o3bl5UhPlHUZ8U0hP/CKzZOlWOu5PmL/YpofcNvizDP9vWpw==}
+    engines: {node: '>=20'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@nikkei/napi-sudachi-darwin-x64@0.12.0':
+    resolution: {integrity: sha512-8UfDEtNpliGtM4LyK3nMP69pFsDpm5XQKtvGlkzKet5OqsGno9ESXpWK2wXUPlp1ySXFYW00e5aGCZ/MK2J+bw==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@nikkei/napi-sudachi-linux-arm64-gnu@0.12.0':
+    resolution: {integrity: sha512-xwXgIkOJLi+zVJPE2MEQn49DhVxxjgvscb5sUNRvKjL3lIC/HYr9maSxKvaO7LRhWDWG81w9ERo+X0TmJYpVGg==}
+    engines: {node: '>=20'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@nikkei/napi-sudachi-linux-x64-gnu@0.12.0':
+    resolution: {integrity: sha512-6cW97I73ipVcFw6HnMnKOgcl416lIHxtvaWGywBF7Meymr/ZY6m/fkuWDEevIY7izeNNvpiyULBVylOXZ8Y9/w==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [linux]
+
+  '@nikkei/napi-sudachi-win32-x64-msvc@0.12.0':
+    resolution: {integrity: sha512-tXVxu3t2MOF/gP9YxyOb8M94VL8x8imtiHTuosFVGsO2eQBNJ3/1gaH+2E/eLpqPt3ioiRReLxRjhIpgahPnBA==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [win32]
+
+  '@nikkei/napi-sudachi@0.12.0':
+    resolution: {integrity: sha512-OEyWr3EXpFns3QIGtMDdzgT0Bs5O2kmEyV7g37xsworWHInFj4Y+jC4Eanr9HuRGX/jeLPMSa4oCm60AQfZUEQ==}
+    engines: {node: '>=20'}
 
   '@noble/ciphers@2.4.0':
     resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
@@ -2200,6 +2237,9 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
+  pend@1.2.0:
+    resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -2623,6 +2663,10 @@ packages:
   yaml@1.10.3:
     resolution: {integrity: sha512-vIYeF1u3CjlhAFekPPAk2h/Kv4T3mAkMox5OymRiJQB0spDP10LHvt+K7G9Ny6NuuMAb25/6n1qyUjAcGNf/AA==}
     engines: {node: '>= 6'}
+
+  yauzl@3.4.0:
+    resolution: {integrity: sha512-jIH9yLR9wqr0wOS0TpBvo/g/2UgZH5qePVbjgRliiF0BYvOZyaBknKsF+x9Iht0O6sqgnB93rCICdOZFecJuDw==}
+    engines: {node: '>=12'}
 
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
@@ -3350,6 +3394,31 @@ snapshots:
     dependencies:
       chevrotain: 12.0.0
       lilconfig: 2.1.0
+
+  '@nikkei/napi-sudachi-darwin-arm64@0.12.0':
+    optional: true
+
+  '@nikkei/napi-sudachi-darwin-x64@0.12.0':
+    optional: true
+
+  '@nikkei/napi-sudachi-linux-arm64-gnu@0.12.0':
+    optional: true
+
+  '@nikkei/napi-sudachi-linux-x64-gnu@0.12.0':
+    optional: true
+
+  '@nikkei/napi-sudachi-win32-x64-msvc@0.12.0':
+    optional: true
+
+  '@nikkei/napi-sudachi@0.12.0':
+    dependencies:
+      yauzl: 3.4.0
+    optionalDependencies:
+      '@nikkei/napi-sudachi-darwin-arm64': 0.12.0
+      '@nikkei/napi-sudachi-darwin-x64': 0.12.0
+      '@nikkei/napi-sudachi-linux-arm64-gnu': 0.12.0
+      '@nikkei/napi-sudachi-linux-x64-gnu': 0.12.0
+      '@nikkei/napi-sudachi-win32-x64-msvc': 0.12.0
 
   '@noble/ciphers@2.4.0': {}
 
@@ -4390,6 +4459,8 @@ snapshots:
 
   pathe@2.0.3: {}
 
+  pend@1.2.0: {}
+
   picocolors@1.1.1: {}
 
   picomatch@4.0.7: {}
@@ -4716,6 +4787,10 @@ snapshots:
   yallist@3.1.1: {}
 
   yaml@1.10.3: {}
+
+  yauzl@3.4.0:
+    dependencies:
+      pend: 1.2.0
 
   yocto-queue@0.1.0: {}
 

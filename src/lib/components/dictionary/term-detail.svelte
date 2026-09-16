@@ -5,16 +5,17 @@
 		DictionarySentence,
 		DictionaryTerm
 	} from '$lib/server/services/dictionary/dictionary';
+	import PitchAccent from './pitch-accent.svelte';
 
 	let { term, examples = [] }: { term: DictionaryTerm; examples?: DictionarySentence[] } = $props();
 
-	/** All readings that differ from the headword, shown under the title. */
+	const senses = $derived(term.senses.filter((sense) => sense.glosses.spa));
+	const filteredExamples = $derived(examples.filter((example) => example.translations.spa));
 	const readings = $derived(term.readingsText.filter((text) => text !== term.headword));
+	const rank = $derived(
+		term.frequencies.find((frequency) => frequency.text === term.headword)?.rank ?? null
+	);
 
-	/** Corpus rank, lower being more common. */
-	const rank = $derived(term.frequencies[0]?.rank ?? null);
-
-	/** Terms the source marks as common, or ranked high enough to be everyday. */
 	const common = $derived(
 		term.expressions.some((expression) => expression.common) || (rank !== null && rank <= 15000)
 	);
@@ -34,16 +35,6 @@
 				}))
 	);
 
-	/** Glosses of one sense, preferring Spanish and falling back to English. */
-	function primaryGloss(sense: DictionaryTerm['senses'][number]): string {
-		return (sense.glosses?.spa?.length ? sense.glosses.spa : (sense.glosses?.eng ?? [])).join('; ');
-	}
-
-	/** The English gloss, shown underneath when Spanish is the primary one. */
-	function secondaryGloss(sense: DictionaryTerm['senses'][number]): string {
-		return sense.glosses?.spa?.length ? (sense.glosses?.eng ?? []).join('; ') : '';
-	}
-
 	/** Every code attached to a sense, paired with its readable label. */
 	function tags(sense: DictionaryTerm['senses'][number]) {
 		return [
@@ -61,8 +52,8 @@
 	<header class="flex items-start justify-between gap-4">
 		<div class="flex min-w-0 flex-col gap-1">
 			<h2 lang="ja" class="font-serif text-3xl leading-tight">{term.headword}</h2>
-			{#if readings.length > 0}
-				<p lang="ja" class="text-sm text-muted-foreground">{readings.join('、')}</p>
+			{#if term.pitch.length > 0}
+				<PitchAccent kana={term.pitch[0].reading} downstep={term.pitch[0].downstep} />
 			{/if}
 		</div>
 		{#if rank !== null}
@@ -90,7 +81,7 @@
 		<p class="text-xs text-muted-foreground">▾ {sourceLabel(term.dictionary)}</p>
 
 		<ol class="flex flex-col gap-4">
-			{#each term.senses as sense, index (index)}
+			{#each senses as sense, index (index)}
 				<li class="flex gap-3">
 					<span
 						class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border border-border text-xs text-muted-foreground tabular-nums"
@@ -114,10 +105,7 @@
 								{/each}
 							</div>
 						{/if}
-						<p class="text-base leading-relaxed">{primaryGloss(sense)}</p>
-						{#if secondaryGloss(sense)}
-							<p class="text-sm text-muted-foreground">{secondaryGloss(sense)}</p>
-						{/if}
+						<p class="text-base leading-relaxed">{sense.glosses.spa?.join('; ')}</p>
 					</div>
 				</li>
 			{/each}
@@ -145,18 +133,14 @@
 		</section>
 	{/if}
 
-	{#if examples.length > 0}
+	{#if filteredExamples.length > 0}
 		<section class="flex flex-col gap-3 border-t border-border/60 pt-5">
 			<h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Ejemplos</h3>
 			<ul class="flex flex-col gap-3">
-				{#each examples as example (example.id)}
+				{#each filteredExamples as example (example.id)}
 					<li class="flex flex-col gap-1">
 						<p lang="ja" class="text-base">{example.japanese}</p>
-						{#if example.translations?.spa || example.translations?.eng}
-							<p class="text-sm text-muted-foreground">
-								{example.translations?.spa ?? example.translations?.eng}
-							</p>
-						{/if}
+						{example.translations.spa}
 					</li>
 				{/each}
 			</ul>

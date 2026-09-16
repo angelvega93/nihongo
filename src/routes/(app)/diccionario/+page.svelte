@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import KanjiDetail from '$lib/components/dictionary/kanji-detail.svelte';
+	import KanjiListItem from '$lib/components/dictionary/kanji-list-item.svelte';
+	import SentenceDetail from '$lib/components/dictionary/sentence-detail.svelte';
+	import SentenceListItem from '$lib/components/dictionary/sentence-list-item.svelte';
+	import TermDetail from '$lib/components/dictionary/term-detail.svelte';
+	import TermListItem from '$lib/components/dictionary/term-list-item.svelte';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Empty from '$lib/components/ui/empty/index.js';
@@ -9,12 +15,6 @@
 	import { Kbd } from '$lib/components/ui/kbd/index.js';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-	import KanjiDetail from '$lib/components/dictionary/kanji-detail.svelte';
-	import KanjiListItem from '$lib/components/dictionary/kanji-list-item.svelte';
-	import SentenceDetail from '$lib/components/dictionary/sentence-detail.svelte';
-	import SentenceListItem from '$lib/components/dictionary/sentence-list-item.svelte';
-	import TermDetail from '$lib/components/dictionary/term-detail.svelte';
-	import TermListItem from '$lib/components/dictionary/term-list-item.svelte';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
@@ -330,8 +330,8 @@
 				<div class="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
 					<BookOpenIcon class="size-3.5 shrink-0" />
 					<p>
-						Fuente: JMdict, KANJIDIC y Tatoeba, con traducciones al español. Los significados se
-						muestran primero en español.
+						Fuente: JMdict, KANJIDIC y Tatoeba, con traducciones al español. Cuando una entrada
+						no tiene traducción al español se muestra el texto original en inglés.
 					</p>
 				</div>
 			</section>
@@ -343,8 +343,8 @@
 					</Empty.Media>
 					<Empty.Title>Sin resultados para «{data.query}»</Empty.Title>
 					<Empty.Description>
-						Prueba con otra escritura o cambia el modo de búsqueda. Los significados funcionan mejor
-						en español o inglés.
+						Prueba con otra escritura o cambia el modo de búsqueda. Los significados están en
+						español.
 					</Empty.Description>
 				</Empty.Header>
 			</Empty.Root>

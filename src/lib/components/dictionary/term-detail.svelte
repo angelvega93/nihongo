@@ -63,15 +63,10 @@
 		{/if}
 	</header>
 
-	{#if common || readings.length > 0}
+	{#if common}
 		<div class="flex flex-wrap items-center gap-2">
 			{#if common}
 				<Badge class="border-transparent bg-chart-4/25 text-foreground">Común</Badge>
-			{/if}
-			{#if readings.length > 0}
-				<Badge variant="outline" class="font-normal text-muted-foreground">
-					{readings[0]}
-				</Badge>
 			{/if}
 		</div>
 	{/if}

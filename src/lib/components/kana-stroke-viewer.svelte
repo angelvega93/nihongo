@@ -7,12 +7,20 @@
 	import type { Attachment } from 'svelte/attachments';
 	import { MediaQuery } from 'svelte/reactivity';
 
-	type Stroke = { id: string; d: string };
+	type Stroke = { id: string; d: string; durationMs: number; delayMs: number };
 	type StrokeNumber = { id: string; value: string; x: number; y: number };
-	type KanjiVgData = { viewBox: string; strokes: Stroke[]; numbers: StrokeNumber[] };
+	type AnimationMode = 'full' | 'step' | null;
+	type KanjiVgData = {
+		viewBox: string;
+		strokes: Stroke[];
+		numbers: StrokeNumber[];
+		totalDurationMs: number;
+	};
 
 	const KANJIVG_BASE_URL = 'https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji';
-	const STROKE_DURATION_MS = 600;
+	const STROKE_MS_PER_UNIT = 8;
+	const MIN_STROKE_DURATION_MS = 320;
+	const MAX_STROKE_DURATION_MS = 1600;
 	const STROKE_GAP_MS = 120;
 	const MAX_SVG_LENGTH = 500_000;
 	const SVG_PATH_PATTERN = /^[MmZzLlHhVvCcSsQqTtAaEe0-9,.\s+-]*$/;
@@ -24,7 +32,8 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let currentStep = $state(0);
-	let animating = $state(false);
+	let animationMode = $state<AnimationMode>(null);
+	let activeStepIndex = $state<number | null>(null);
 	let animationKey = $state(0);
 	let animationTimer: ReturnType<typeof setTimeout> | undefined;
 	const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)', false);
@@ -45,14 +54,20 @@
 		}
 	}
 
-	function finishAnimationAfter(strokeCount: number) {
+	function finishAnimationAfter(
+		mode: Exclude<AnimationMode, null>,
+		durationMs: number,
+		stepIndex: number | null = null
+	) {
 		clearAnimationTimer();
 		animationTimer = setTimeout(
 			() => {
-				animating = false;
+				if (animationMode !== mode || (mode === 'step' && activeStepIndex !== stepIndex)) return;
+				animationMode = null;
+				activeStepIndex = null;
 				animationTimer = undefined;
 			},
-			strokeCount * (STROKE_DURATION_MS + STROKE_GAP_MS)
+			durationMs
 		);
 	}
 
@@ -63,19 +78,41 @@
 		animationKey += 1;
 
 		if (reducedMotion.current) {
-			animating = false;
+			animationMode = null;
+			activeStepIndex = null;
 			return;
 		}
 
-		animating = true;
-		finishAnimationAfter(data.strokes.length);
+		animationMode = 'full';
+		activeStepIndex = null;
+		finishAnimationAfter('full', data.totalDurationMs);
 	}
 
-	function setStep(step: number) {
+	function showPreviousStroke() {
 		if (!data) return;
 		clearAnimationTimer();
-		animating = false;
-		currentStep = Math.min(Math.max(step, 0), data.strokes.length);
+		animationMode = null;
+		activeStepIndex = null;
+		currentStep = Math.max(currentStep - 1, 0);
+	}
+
+	function showNextStroke() {
+		if (!data || currentStep >= data.strokes.length) return;
+		clearAnimationTimer();
+
+		const stepIndex = currentStep;
+		currentStep += 1;
+
+		if (reducedMotion.current) {
+			animationMode = null;
+			activeStepIndex = null;
+			return;
+		}
+
+		activeStepIndex = stepIndex;
+		animationMode = 'step';
+		animationKey += 1;
+		finishAnimationAfter('step', data.strokes[stepIndex].durationMs, stepIndex);
 	}
 
 	function parseCoordinate(text: Element, axis: 'x' | 'y'): number | null {
@@ -104,11 +141,21 @@
 			? viewBoxValue.replaceAll(',', ' ')
 			: '0 0 109 109';
 		const strokeElements = Array.from(document.querySelectorAll('[id^="kvg:StrokePaths"] path[d]'));
+		let nextDelayMs = 0;
 		const strokes = strokeElements.flatMap((path, index): Stroke[] => {
 			const d = path.getAttribute('d')?.trim() ?? '';
-			return d && d.length <= 20_000 && SVG_PATH_PATTERN.test(d)
-				? [{ id: `stroke-${index + 1}`, d }]
-				: [];
+			if (!d || d.length > 20_000 || !SVG_PATH_PATTERN.test(d)) return [];
+
+			const pathLength = (path as SVGPathElement).getTotalLength();
+			if (!Number.isFinite(pathLength) || pathLength <= 0) return [];
+
+			const durationMs = Math.min(
+				Math.max(Math.round(pathLength * STROKE_MS_PER_UNIT), MIN_STROKE_DURATION_MS),
+				MAX_STROKE_DURATION_MS
+			);
+			const stroke = { id: `stroke-${index + 1}`, d, durationMs, delayMs: nextDelayMs };
+			nextDelayMs += durationMs + STROKE_GAP_MS;
+			return [stroke];
 		});
 
 		if (strokes.length === 0 || strokes.length !== strokeElements.length || strokes.length > 100) {
@@ -126,7 +173,9 @@
 			}
 		);
 
-		return { viewBox, strokes, numbers };
+		const finalStroke = strokes.at(-1);
+		const totalDurationMs = finalStroke ? finalStroke.delayMs + finalStroke.durationMs : 0;
+		return { viewBox, strokes, numbers, totalDurationMs };
 	}
 
 	function loadStrokeData(url: string | null): Attachment {
@@ -136,7 +185,8 @@
 			clearAnimationTimer();
 			data = null;
 			currentStep = 0;
-			animating = false;
+			animationMode = null;
+			activeStepIndex = null;
 
 			if (!url) {
 				loading = false;
@@ -163,8 +213,8 @@
 					currentStep = parsed.strokes.length;
 					animationKey += 1;
 					if (!reducedMotion.current) {
-						animating = true;
-						finishAnimationAfter(parsed.strokes.length);
+						animationMode = 'full';
+						finishAnimationAfter('full', parsed.totalDurationMs);
 					}
 				} catch (fetchError) {
 					if (controller.signal.aborted) return;
@@ -211,23 +261,28 @@
 								stroke-width="3.5"
 								stroke-linecap="round"
 								stroke-linejoin="round"
-								class:stroke-animated={animating}
-								class:stroke-hidden={!animating && index >= currentStep}
-								style:--stroke-delay={`${index * (STROKE_DURATION_MS + STROKE_GAP_MS)}ms`}
+								class:stroke-full-animated={animationMode === 'full'}
+								class:stroke-step-animated={animationMode === 'step' && index === activeStepIndex}
+								class:stroke-hidden={animationMode !== 'full' && index >= currentStep}
+								style:--stroke-duration={`${stroke.durationMs}ms`}
+								style:--stroke-delay={`${stroke.delayMs}ms`}
 							/>
 						{/each}
 					</g>
 					<g class="fill-muted-foreground text-[8px] font-medium" aria-hidden="true">
 						{#each data.numbers as number, index (number.id)}
-							<text
-								x={number.x}
-								y={number.y}
-								class:number-animated={animating}
-								class:number-hidden={!animating && index >= currentStep}
-								style:--number-delay={`${index * (STROKE_DURATION_MS + STROKE_GAP_MS)}ms`}
-							>
-								{number.value}
-							</text>
+							{#if data.strokes[index]}
+								<text
+									x={number.x}
+									y={number.y}
+									class:number-full-animated={animationMode === 'full'}
+									class:number-step-animated={animationMode === 'step' && index === activeStepIndex}
+									class:number-hidden={animationMode !== 'full' && index >= currentStep}
+									style:--number-delay={`${data.strokes[index].delayMs}ms`}
+								>
+									{number.value}
+								</text>
+							{/if}
 						{/each}
 					</g>
 				{/key}
@@ -238,14 +293,14 @@
 	{#if data}
 		<figcaption class="flex flex-wrap items-center justify-between gap-2">
 			<p class="text-sm text-muted-foreground tabular-nums" aria-live="polite">
-				{animating ? 'Reproduciendo' : `Paso ${currentStep} de ${data.strokes.length}`}
+				{animationMode ? 'Reproduciendo' : `Paso ${currentStep} de ${data.strokes.length}`}
 			</p>
 			<div class="flex items-center gap-1">
 				<Button
 					variant="outline"
 					size="icon"
-					onclick={() => setStep(currentStep - 1)}
-					disabled={animating || currentStep === 0}
+					onclick={showPreviousStroke}
+					disabled={animationMode !== null || currentStep === 0}
 					aria-label="Trazo anterior"
 					title="Trazo anterior"
 				>
@@ -254,14 +309,14 @@
 				<Button
 					variant="outline"
 					size="icon"
-					onclick={() => setStep(currentStep + 1)}
-					disabled={animating || currentStep === data.strokes.length}
+					onclick={showNextStroke}
+					disabled={animationMode !== null || currentStep === data.strokes.length}
 					aria-label="Trazo siguiente"
 					title="Trazo siguiente"
 				>
 					<ChevronRightIcon aria-hidden="true" />
 				</Button>
-				<Button variant="outline" onclick={play} disabled={animating}>
+				<Button variant="outline" onclick={play} disabled={animationMode !== null}>
 					<RotateCcwIcon data-icon="inline-start" aria-hidden="true" />
 					Reproducir
 				</Button>
@@ -271,19 +326,36 @@
 </figure>
 
 <style>
-	.stroke-animated {
+	.stroke-full-animated,
+	.stroke-step-animated {
+		opacity: 0;
 		stroke-dasharray: 1;
 		stroke-dashoffset: 1;
-		animation: draw-stroke 600ms ease-out var(--stroke-delay) both;
+	}
+
+	.stroke-full-animated {
+		animation: draw-stroke var(--stroke-duration) ease-out var(--stroke-delay) forwards;
+	}
+
+	.stroke-step-animated {
+		animation: draw-stroke var(--stroke-duration) ease-out forwards;
 	}
 
 	.stroke-hidden {
 		opacity: 0;
 	}
 
-	.number-animated {
+	.number-full-animated,
+	.number-step-animated {
 		opacity: 0;
-		animation: reveal-stroke-number 1ms step-end var(--number-delay) both;
+	}
+
+	.number-full-animated {
+		animation: reveal-stroke-number 1ms step-start var(--number-delay) forwards;
+	}
+
+	.number-step-animated {
+		animation: reveal-stroke-number 1ms step-start forwards;
 	}
 
 	.number-hidden {
@@ -291,24 +363,37 @@
 	}
 
 	@keyframes draw-stroke {
+		from {
+			opacity: 1;
+			stroke-dashoffset: 1;
+		}
+
 		to {
+			opacity: 1;
 			stroke-dashoffset: 0;
 		}
 	}
 
 	@keyframes reveal-stroke-number {
+		from {
+			opacity: 1;
+		}
+
 		to {
 			opacity: 1;
 		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.stroke-animated {
+		.stroke-full-animated,
+		.stroke-step-animated {
 			animation: none;
+			opacity: 1;
 			stroke-dashoffset: 0;
 		}
 
-		.number-animated {
+		.number-full-animated,
+		.number-step-animated {
 			animation: none;
 			opacity: 1;
 		}

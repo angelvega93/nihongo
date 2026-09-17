@@ -7,7 +7,15 @@
 	import type { Attachment } from 'svelte/attachments';
 
 	type Point = { x: number; y: number };
-	type ExpectedStroke = { id: string; d: string; points: Point[]; length: number };
+	type ExpectedStroke = {
+		id: string;
+		d: string;
+		points: Point[];
+		length: number;
+		indicatorPoints: Point[];
+		labelPoint: Point;
+		arrowheadPoints: Point[];
+	};
 	type UserStroke = { id: number; points: Point[]; accepted: boolean };
 	type Score = { accepted: boolean; feedback: string };
 	type StrokeData = { strokes: ExpectedStroke[] };
@@ -102,6 +110,125 @@
 		return { points, length };
 	}
 
+	function initialCurve(points: Point[], targetLength = 10): Point[] {
+		if (points.length < 2) return points;
+
+		const result = [{ ...points[0] }];
+		let traversed = 0;
+		for (let index = 1; index < points.length; index += 1) {
+			const segmentLength = distance(points[index - 1], points[index]);
+			if (segmentLength === 0) continue;
+
+			if (traversed + segmentLength >= targetLength) {
+				const ratio = (targetLength - traversed) / segmentLength;
+				result.push({
+					x: points[index - 1].x + (points[index].x - points[index - 1].x) * ratio,
+					y: points[index - 1].y + (points[index].y - points[index - 1].y) * ratio
+				});
+				break;
+			}
+
+			result.push({ ...points[index] });
+			traversed += segmentLength;
+		}
+		return result;
+	}
+
+	function initialDirection(points: Point[]): Point {
+		const start = points[0];
+		const next = points.find((point) => distance(start, point) >= 1) ?? points.at(-1)!;
+		const magnitude = distance(start, next);
+		return magnitude === 0
+			? { x: 1, y: 0 }
+			: { x: (next.x - start.x) / magnitude, y: (next.y - start.y) / magnitude };
+	}
+
+	function createIndicatorGeometry(points: Point[]) {
+		const curve = initialCurve(points);
+		const direction = initialDirection(curve);
+		const perpendicular = { x: -direction.y, y: direction.x };
+		const badgeRadius = 3.4;
+		const safeMin = 4;
+		const safeMax = 105;
+
+		const candidates = [7, 6, 5, 4].flatMap((offset) =>
+			([-1, 1] as const).map((side) => {
+				const indicatorPoints = curve.map((point) => ({
+					x: point.x + perpendicular.x * offset * side,
+					y: point.y + perpendicular.y * offset * side
+				}));
+				const tip = indicatorPoints.at(-1)!;
+				const previous = indicatorPoints.findLast((point) => distance(point, tip) >= 0.5) ??
+					indicatorPoints[0];
+				const tipDirection = initialDirection([previous, tip]);
+				const base = {
+					x: tip.x - tipDirection.x * 2.6,
+					y: tip.y - tipDirection.y * 2.6
+				};
+				const arrowPerpendicular = { x: -tipDirection.y * 1.35, y: tipDirection.x * 1.35 };
+				const arrowheadPoints = [
+					{ x: base.x + arrowPerpendicular.x, y: base.y + arrowPerpendicular.y },
+					tip,
+					{ x: base.x - arrowPerpendicular.x, y: base.y - arrowPerpendicular.y }
+				];
+				const start = indicatorPoints[0];
+				const labelPoint = {
+					x: start.x - direction.x * (badgeRadius + 1.5),
+					y: start.y - direction.y * (badgeRadius + 1.5)
+				};
+				const geometryPoints = [...indicatorPoints, ...arrowheadPoints];
+				const clearance = Math.min(
+					...geometryPoints.flatMap((point) => [
+						point.x - safeMin,
+						safeMax - point.x,
+						point.y - safeMin,
+						safeMax - point.y
+					]),
+					labelPoint.x - badgeRadius - safeMin,
+					safeMax - labelPoint.x - badgeRadius,
+					labelPoint.y - badgeRadius - safeMin,
+					safeMax - labelPoint.y - badgeRadius
+				);
+
+				return { indicatorPoints, labelPoint, arrowheadPoints, clearance, offset, side };
+			})
+		);
+
+		const fittingOffset = candidates.find((candidate) => candidate.clearance >= 0)?.offset ?? 4;
+		const selected = candidates
+			.filter((candidate) => candidate.offset === fittingOffset)
+			.reduce((best, candidate) => (candidate.clearance > best.clearance ? candidate : best));
+		if (selected.clearance >= 0) return selected;
+
+		const bounds = [...selected.indicatorPoints, ...selected.arrowheadPoints, {
+			x: selected.labelPoint.x - badgeRadius,
+			y: selected.labelPoint.y - badgeRadius
+		}, {
+			x: selected.labelPoint.x + badgeRadius,
+			y: selected.labelPoint.y + badgeRadius
+		}];
+		const minX = Math.min(...bounds.map((point) => point.x));
+		const maxX = Math.max(...bounds.map((point) => point.x));
+		const minY = Math.min(...bounds.map((point) => point.y));
+		const maxY = Math.max(...bounds.map((point) => point.y));
+		const shift = {
+			x: minX < safeMin ? safeMin - minX : maxX > safeMax ? safeMax - maxX : 0,
+			y: minY < safeMin ? safeMin - minY : maxY > safeMax ? safeMax - maxY : 0
+		};
+		const separation = (perpendicular.x * shift.x + perpendicular.y * shift.y) * selected.side;
+		if (selected.offset + separation < 4) {
+			const correction = 4 - selected.offset - separation;
+			shift.x += perpendicular.x * selected.side * correction;
+			shift.y += perpendicular.y * selected.side * correction;
+		}
+		const translate = (point: Point) => ({ x: point.x + shift.x, y: point.y + shift.y });
+		return {
+			indicatorPoints: selected.indicatorPoints.map(translate),
+			labelPoint: translate(selected.labelPoint),
+			arrowheadPoints: selected.arrowheadPoints.map(translate)
+		};
+	}
+
 	function parseKanjiVg(svgText: string): StrokeData {
 		if (svgText.length > MAX_SVG_LENGTH) throw new Error('El archivo SVG es demasiado grande.');
 
@@ -118,7 +245,16 @@
 			const d = path.getAttribute('d')?.trim() ?? '';
 			if (!d || d.length > 20_000 || !SVG_PATH_PATTERN.test(d)) return [];
 			const sampled = samplePath(d);
-			return sampled ? [{ id: `expected-${index + 1}`, d, ...sampled }] : [];
+			if (!sampled) return [];
+			const indicatorGeometry = createIndicatorGeometry(sampled.points);
+			return [
+				{
+					id: `expected-${index + 1}`,
+					d,
+					...sampled,
+					...indicatorGeometry
+				}
+			];
 		});
 
 		if (strokes.length === 0 || strokes.length !== pathElements.length || strokes.length > 100) {
@@ -339,6 +475,53 @@
 				>
 					{#each data.strokes as stroke (stroke.id)}
 						<path d={stroke.d} />
+					{/each}
+				</g>
+				<g class="pointer-events-none" aria-hidden="true">
+					{#each data.strokes as stroke, index (stroke.id)}
+						{#if index >= acceptedCount}
+							<g
+								class={index === acceptedCount
+									? 'text-primary'
+									: 'text-muted-foreground opacity-55'}
+							>
+								<polyline
+									points={pointsAttribute(stroke.indicatorPoints)}
+									fill="none"
+									stroke="currentColor"
+									stroke-width={index === acceptedCount ? 1.35 : 0.9}
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/>
+								<polyline
+									points={pointsAttribute(stroke.arrowheadPoints)}
+									fill="none"
+									stroke="currentColor"
+									stroke-width={index === acceptedCount ? 1.35 : 0.9}
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/>
+								<circle
+									cx={stroke.labelPoint.x}
+									cy={stroke.labelPoint.y}
+									r="3.4"
+									class="fill-background"
+									stroke="currentColor"
+									stroke-width={index === acceptedCount ? 1.1 : 0.75}
+								/>
+								<text
+									x={stroke.labelPoint.x}
+									y={stroke.labelPoint.y}
+									fill="currentColor"
+									font-size="4.2"
+									font-weight="700"
+									text-anchor="middle"
+									dominant-baseline="central"
+								>
+									{index + 1}
+								</text>
+							</g>
+						{/if}
 					{/each}
 				</g>
 				{#each userStrokes as stroke (stroke.id)}

@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { tokenizeJapanese } from '$lib/japanese/tokenize.remote';
 	import type { JapaneseToken, TokenCategory } from '$lib/japanese/furigana';
+	import { tokenizeJapanese } from '$lib/japanese/tokenize.remote';
 	import { cn } from '$lib/utils';
+	import { State } from 'ts-fsrs';
 
 	let {
 		text,
@@ -50,25 +51,36 @@
 		return token.category !== 'symbol' && token.surface.trim().length > 0;
 	}
 
+	function knowledgeClass(token: JapaneseToken) {
+		if (!token.card) return;
+
+		if (token.card.state === State.Learning || token.card.state === State.Relearning)
+			return 'bg-chart-5/25 text-foreground';
+		if (token.card.state === State.Review) return 'bg-chart-4/25 text-foreground';
+	}
+
 	function wordClass(token: JapaneseToken) {
 		return cn(
 			'rounded-lg px-0.5 transition-colors',
-			isWord(token) && showWordBounds && 'bg-accent/40 mx-0.5 px-1.5',
+			isWord(token) && showWordBounds && 'mx-0.5 px-1.5',
+			isWord(token) && (knowledgeClass(token) ?? 'bg-accent/40'),
 			colorByPos && categoryColors[token.category]
 		);
 	}
 </script>
 
-{#snippet ruby(token: JapaneseToken)}{#each token.segments as segment, index (index)}{#if furigana && segment.ruby}<ruby
-			>{segment.text}<rp>(</rp><rt class="text-[0.45em] font-normal tracking-tight opacity-70"
-				>{segment.ruby}</rt
-			><rp>)</rp></ruby
-		>{:else}{segment.text}{/if}{/each}{/snippet}
+{#snippet ruby(
+	token: JapaneseToken
+)}{#each token.segments as segment, index (index)}{#if furigana && segment.ruby}<ruby
+				>{segment.text}<rp>(</rp><rt class="text-[0.45em] font-normal tracking-tight opacity-70"
+					>{segment.ruby}</rt
+				><rp>)</rp></ruby
+			>{:else}{segment.text}{/if}{/each}{/snippet}
 
 {#await tokenizeJapanese(text)}
 	<p class={cn('flex flex-wrap gap-2', sizes[size], className)} aria-busy="true">
 		{#each Array.from({ length: 6 }, (_, index) => index) as index (index)}
-			<span class="bg-muted h-[1em] w-14 animate-pulse rounded-md"></span>
+			<span class="h-[1em] w-14 animate-pulse rounded-md bg-muted"></span>
 		{/each}
 	</p>
 {:then tokens}
@@ -81,7 +93,7 @@
 					onclick={() => onselect(token)}
 					class={cn(
 						wordClass(token),
-						'hover:bg-primary/20 focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none'
+						'cursor-pointer hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
 					)}>{@render ruby(token)}</button
 				>
 			{:else}
@@ -90,5 +102,5 @@
 		{/each}
 	</p>
 {:catch error}
-	<p class="text-destructive text-sm">No se pudo analizar el texto: {error.message}</p>
+	<p class="text-sm text-destructive">No se pudo analizar el texto: {error.message}</p>
 {/await}

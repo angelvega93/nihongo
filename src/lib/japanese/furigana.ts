@@ -4,6 +4,8 @@
  * both the server and the client.
  */
 
+import type { FsrsCardRow } from '$lib/fsrs/card';
+
 /** A piece of a word: plain text, plus its reading when it is written in kanji. */
 export type FuriganaSegment = {
 	text: string;
@@ -35,6 +37,8 @@ export type JapaneseToken = {
 	pos: string;
 	category: TokenCategory;
 	segments: FuriganaSegment[];
+	/** The user's FSRS state for this vocabulary word, when it has a card. */
+	card?: FsrsCardRow;
 };
 
 /** Kanji, plus the iteration marks that behave like kanji (`々`, `ヶ`). */

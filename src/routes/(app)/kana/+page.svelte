@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import KanaStrokeViewer from '$lib/components/kana-stroke-viewer.svelte';
+	import KanaWritingPad from '$lib/components/kana-writing-pad.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -260,9 +261,22 @@
 						<Card.Description class="text-base">{current.romaji}</Card.Description>
 					</Card.Header>
 					<Card.Content class="mx-auto w-full max-w-72">
-						{#key current.character}
-							<KanaStrokeViewer character={current.character} />
-						{/key}
+						<Tabs.Root value="strokes">
+							<Tabs.List class="grid w-full grid-cols-2">
+								<Tabs.Trigger value="strokes">Ver trazos</Tabs.Trigger>
+								<Tabs.Trigger value="practice">Practicar</Tabs.Trigger>
+							</Tabs.List>
+							<Tabs.Content value="strokes">
+								{#key current.character}
+									<KanaStrokeViewer character={current.character} />
+								{/key}
+							</Tabs.Content>
+							<Tabs.Content value="practice">
+								{#key current.character}
+									<KanaWritingPad character={current.character} />
+								{/key}
+							</Tabs.Content>
+						</Tabs.Root>
 					</Card.Content>
 					<Card.Footer class="grid grid-cols-3 gap-2">
 						<Button

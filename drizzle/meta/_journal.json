@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1789355486803,
-      "tag": "0000_secret_dracula",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1789368744584,
-      "tag": "0001_careless_spirit",
+      "when": 1789604637316,
+      "tag": "0000_polite_shockwave",
       "breakpoints": true
     }
   ]

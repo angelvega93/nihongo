@@ -1,21 +1,22 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import * as Card from '$lib/components/ui/card/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
+	import FuriganaText from '$lib/components/furigana-text.svelte';
+	import TokenizedJapanese from '$lib/components/tokenized-japanese.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { Progress } from '$lib/components/ui/progress/index.js';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
-	import { Separator } from '$lib/components/ui/separator/index.js';
-	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Empty from '$lib/components/ui/empty/index.js';
 	import { Kbd } from '$lib/components/ui/kbd/index.js';
-	import FuriganaText from '$lib/components/furigana-text.svelte';
-	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
-	import UndoIcon from '@lucide/svelte/icons/undo-2';
-	import { Rating, State, show_diff_message, type Grade } from 'ts-fsrs';
+	import { Progress } from '$lib/components/ui/progress/index.js';
+	import { Separator } from '$lib/components/ui/separator/index.js';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { rowToFsrsCard } from '$lib/fsrs/card';
 	import { createReviewSnapshot } from '$lib/fsrs/preview';
+	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import UndoIcon from '@lucide/svelte/icons/undo-2';
 	import { untrack } from 'svelte';
+	import { Rating, State, show_diff_message, type Grade } from 'ts-fsrs';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -294,7 +295,10 @@
 						<p class="text-lg font-medium">{current.metadata.word_meaning}</p>
 						{#each current.metadata.word_sentences as sentence, i (i)}
 							<div class="space-y-1 rounded-lg bg-muted/50 p-4 text-left">
-								<p class="text-base"><FuriganaText text={sentence.furigana} /></p>
+								<TokenizedJapanese
+									text={sentence.sentence.replaceAll('*', '')}
+									onselect={(t) => console.log(t.baseForm)}
+								/>
 								<p class="text-sm text-muted-foreground">{sentence.meaning}</p>
 							</div>
 						{/each}

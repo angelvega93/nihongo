@@ -7,7 +7,8 @@ import {
 	serial,
 	smallint,
 	text,
-	timestamp
+	timestamp,
+	unique
 } from 'drizzle-orm/pg-core';
 import type { FSRSParameters } from 'ts-fsrs';
 import { z } from 'zod';
@@ -63,12 +64,7 @@ export const cards = pgTable('cards', {
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id, { onDelete: 'cascade' }),
-	deckId: integer('deck_id')
-		.notNull()
-		.references(() => decks.id, { onDelete: 'cascade' }),
-	noteId: integer('note_id')
-		.notNull()
-		.references(() => notes.id, { onDelete: 'cascade' }),
+	termId: text('term_id'), // Example: vocab:面白い, recall:面白い, etc... it's a way to track progress of specific terms.
 	due: bigint('due', { mode: 'number' }).notNull(),
 	stability: doublePrecision('stability').notNull(),
 	difficulty: doublePrecision('difficulty').notNull(),
@@ -86,7 +82,22 @@ export const cards = pgTable('cards', {
 		.defaultNow()
 		.$onUpdate(() => /* @__PURE__ */ new Date())
 		.notNull()
-});
+}, (t) => [
+	unique().on(t.userId, t.termId),
+]);
+
+export const decksCards = pgTable('decks_cards', {
+	deckId: integer('deck_id')
+		.notNull()
+		.references(() => decks.id, { onDelete: 'cascade' }),
+	cardId: integer('card_id')
+		.notNull()
+		.references(() => cards.id, { onDelete: 'cascade' }),
+	source: text('source'), // Example: Notes table
+	sourceId: text('source_id').notNull()
+}, (t) => [
+	unique().on(t.deckId, t.cardId),
+]);
 
 export const revLog = pgTable('rev_log', {
 	id: serial('id').primaryKey(),

@@ -1,5 +1,12 @@
 import { db } from '$lib/server/db';
-import { cardLimitSchema, cards, decks, revLog, type CardLimit } from '$lib/server/db/schema';
+import {
+	cardLimitSchema,
+	cards,
+	decks,
+	decksCards,
+	revLog,
+	type CardLimit
+} from '$lib/server/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { fsrs, Rating, type FSRSParameters, type FSRSHistory, type Grade } from 'ts-fsrs';
 import { cardToUpdate, logToInsert, toFsrsCard, toReviewLog, type CardRow } from './mappers';
@@ -17,7 +24,8 @@ export class ReviewService {
 		const [row] = await db
 			.select({ card: cards, fsrs: decks.fsrs, cardLimit: decks.cardLimit })
 			.from(cards)
-			.innerJoin(decks, eq(decks.id, cards.deckId))
+			.innerJoin(decksCards, eq(decksCards.cardId, cards.id))
+			.innerJoin(decks, eq(decks.id, decksCards.deckId))
 			.where(and(eq(cards.id, cardId), eq(cards.userId, userId)));
 
 		if (!row) throw new Error('Card not found');
@@ -170,7 +178,8 @@ export class ReviewService {
 		const cardRows = await db
 			.select({ card: cards, fsrs: decks.fsrs })
 			.from(cards)
-			.innerJoin(decks, eq(decks.id, cards.deckId))
+			.innerJoin(decksCards, eq(decksCards.cardId, cards.id))
+			.innerJoin(decks, eq(decks.id, decksCards.deckId))
 			.where(and(eq(cards.userId, userId), eq(cards.deleted, 0), inArray(cards.id, cardIds)));
 
 		const logRows = await db

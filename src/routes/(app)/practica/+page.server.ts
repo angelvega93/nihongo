@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
-import { cards, decks, notes, revLog } from '$lib/server/db/schema';
+import { cards, decks, decksCards, notes, revLog } from '$lib/server/db/schema';
 import { and, asc, count, eq, gte, lt, ne, or, sql } from 'drizzle-orm';
 import { Rating, State, type Grade } from 'ts-fsrs';
 import { reviewService } from '$lib/server/services/fsrs/review';
@@ -34,7 +34,7 @@ export const load: PageServerLoad = async (event) => {
 	const subQuery = db
 		.select({
 			id: cards.id,
-			noteId: cards.noteId,
+			noteId: sql<number>`${decksCards.sourceId}::integer`.as('note_id'),
 			due: cards.due,
 			stability: cards.stability,
 			difficulty: cards.difficulty,
@@ -46,7 +46,7 @@ export const load: PageServerLoad = async (event) => {
 			state: cards.state,
 			lastReview: cards.lastReview,
 			deckFsrs: decks.fsrs,
-			rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${cards.deckId}, ${cards.state} ORDER BY ${cards.id})::int`.as(
+			rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${decksCards.deckId}, ${cards.state} ORDER BY ${cards.id})::int`.as(
 				'rn'
 			),
 			stateLimit: sql<number>`(CASE ${cards.state}
@@ -57,7 +57,8 @@ export const load: PageServerLoad = async (event) => {
 			END)::bigint`.as('state_limit')
 		})
 		.from(cards)
-		.innerJoin(decks, eq(decks.id, cards.deckId))
+		.innerJoin(decksCards, eq(decksCards.cardId, cards.id))
+		.innerJoin(decks, eq(decks.id, decksCards.deckId))
 		.where(
 			and(
 				eq(cards.userId, userId),

@@ -9,6 +9,7 @@
 	import FlameIcon from '@lucide/svelte/icons/flame';
 	import GraduationCapIcon from '@lucide/svelte/icons/graduation-cap';
 	import HomeIcon from '@lucide/svelte/icons/home';
+	import LanguagesIcon from '@lucide/svelte/icons/languages';
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import ListChecksIcon from '@lucide/svelte/icons/list-checks';
 
@@ -17,6 +18,7 @@
 	const navItems = [
 		{ label: 'Resumen', icon: HomeIcon, href: '/' },
 		{ label: 'Cursos', icon: GraduationCapIcon, href: '/cursos' },
+		{ label: 'Kana', icon: LanguagesIcon, href: '/kana' },
 		{ label: 'Práctica', icon: ListChecksIcon, href: '/practica', badge: 7 },
 		{ label: 'Decks', icon: LayersIcon, href: '/decks' },
 		{ label: 'Diccionario', icon: BookOpenIcon, href: '/diccionario' }

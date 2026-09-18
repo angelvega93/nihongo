@@ -62,11 +62,6 @@ export function allKanaForScript(_script: KanaScript): Kana[] {
 	return BASIC_KANA;
 }
 
-/** The first row (vowels) of a script, used as the default selection. */
-export function starterSelection(script: KanaScript): string[] {
-	return KANA_ROWS[0].kana.map((kana) => kanaCharacter(kana, script));
-}
-
 /** Look up a kana by its stable id (`romaji`). */
 export function kanaById(id: string): Kana | undefined {
 	return BASIC_KANA.find((kana) => kana.id === id);

@@ -13,7 +13,7 @@
 	import Volume2Icon from '@lucide/svelte/icons/volume-2';
 	import { onMount } from 'svelte';
 
-	type Message = { role: 'user' | 'assistant'; content: string };
+	type Message = { role: 'user' | 'assistant'; content: string; audioUrl?: string };
 	type SpeechRecognitionResultEvent = Event & {
 		resultIndex: number;
 		results: SpeechRecognitionResultList;
@@ -47,7 +47,7 @@
 	let activePointerId: number | undefined;
 	let holdingToTalk = false;
 	let requestController: AbortController | undefined;
-	let activeUtterance: SpeechSynthesisUtterance | undefined;
+	let activeAudio: HTMLAudioElement | undefined;
 
 	const statusText = $derived(
 		listening
@@ -110,13 +110,10 @@
 		return () => {
 			recognition?.abort();
 			requestController?.abort();
-			if (activeUtterance) {
-				activeUtterance.onstart = null;
-				activeUtterance.onend = null;
-				activeUtterance.onerror = null;
-				activeUtterance = undefined;
+			stopAudio();
+			for (const message of messages) {
+				if (message.audioUrl) URL.revokeObjectURL(message.audioUrl);
 			}
-			window.speechSynthesis.cancel();
 		};
 	});
 
@@ -129,7 +126,7 @@
 			(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 		}
 
-		window.speechSynthesis.cancel();
+		stopAudio();
 		speaking = false;
 		holdingToTalk = true;
 		errorMessage = '';
@@ -203,8 +200,17 @@
 			if (!response.ok || !result?.reply)
 				throw new Error(result?.message ?? 'No se pudo obtener respuesta.');
 
-			messages = [...nextMessages, { role: 'assistant', content: result.reply }];
-			speak(result.reply);
+			const assistantMessage: Message = { role: 'assistant', content: result.reply };
+			messages = [...nextMessages, assistantMessage];
+
+			try {
+				assistantMessage.audioUrl = await synthesizeSpeech(result.reply);
+				messages = [...nextMessages, assistantMessage];
+				playAudio(assistantMessage.audioUrl);
+			} catch (cause) {
+				errorMessage =
+					cause instanceof Error ? cause.message : 'La respuesta llegó, pero no se pudo generar el audio.';
+			}
 		} catch (cause) {
 			if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
 				errorMessage = cause instanceof Error ? cause.message : 'No se pudo obtener respuesta.';
@@ -215,26 +221,49 @@
 		}
 	}
 
-	function speak(text: string) {
-		window.speechSynthesis.cancel();
-		const utterance = new SpeechSynthesisUtterance(text);
-		utterance.lang = 'ja-JP';
-		utterance.rate = 0.92;
-		utterance.voice =
-			window.speechSynthesis.getVoices().find((voice) => voice.lang.startsWith('ja')) ?? null;
-		utterance.onstart = () => (speaking = true);
-		utterance.onend = utterance.onerror = () => {
+	async function synthesizeSpeech(text: string) {
+		const response = await fetch(resolve('/practica/ia/audio'), {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text }),
+			signal: requestController?.signal
+		});
+		if (!response.ok) {
+			const result = (await response.json().catch(() => null)) as { message?: string } | null;
+			throw new Error(result?.message ?? 'La respuesta llegó, pero no se pudo generar el audio.');
+		}
+
+		return URL.createObjectURL(await response.blob());
+	}
+
+	function playAudio(audioUrl: string) {
+		stopAudio();
+		const audio = new Audio(audioUrl);
+		audio.onplay = () => (speaking = true);
+		audio.onended = audio.onerror = () => {
 			speaking = false;
-			activeUtterance = undefined;
+			activeAudio = undefined;
 		};
-		activeUtterance = utterance;
-		window.speechSynthesis.speak(utterance);
+		activeAudio = audio;
+		void audio.play().catch(() => {
+			speaking = false;
+			activeAudio = undefined;
+		});
+	}
+
+	function stopAudio() {
+		activeAudio?.pause();
+		activeAudio = undefined;
+		speaking = false;
 	}
 
 	function resetConversation() {
 		cancelListening();
 		requestController?.abort();
-		window.speechSynthesis.cancel();
+		stopAudio();
+		for (const message of messages) {
+			if (message.audioUrl) URL.revokeObjectURL(message.audioUrl);
+		}
 		messages = [];
 		draft = '';
 		errorMessage = '';
@@ -282,7 +311,7 @@
 			</div>
 			<div>
 				<h1 class="font-semibold">Aiko</h1>
-				<p class="text-xs text-muted-foreground">Tutora de conversación en japonés</p>
+				<p class="text-xs text-muted-foreground">Tutora de japonés en español</p>
 			</div>
 		</div>
 
@@ -316,7 +345,8 @@
 							size="icon-sm"
 							aria-label="Escuchar respuesta"
 							title="Escuchar respuesta"
-							onclick={() => speak(message.content)}><Volume2Icon /></Button
+							disabled={!message.audioUrl}
+							onclick={() => message.audioUrl && playAudio(message.audioUrl)}><Volume2Icon /></Button
 						>
 					{/if}
 				</div>
@@ -330,7 +360,7 @@
 					bind:value={draft}
 					rows={2}
 					maxlength={2000}
-					placeholder="También puedes escribir en japonés…"
+					placeholder="También puedes escribir tu pregunta en español…"
 					disabled={sending || listening}
 					class="min-h-16 w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
 				></textarea>
@@ -385,7 +415,7 @@
 			<Card.Header><Card.Title class="text-sm">Privacidad</Card.Title></Card.Header>
 			<Card.Content class="text-xs leading-5 text-muted-foreground"
 				>El navegador procesa el audio mediante su servicio de voz. Solo la transcripción y el
-				historial reciente se envían a OpenRouter.</Card.Content
+				historial reciente se envían a OpenRouter; Gemini genera el audio de cada respuesta.</Card.Content
 			>
 		</Card.Root>
 	</aside>

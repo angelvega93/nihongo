@@ -19,6 +19,13 @@
 	type UserStroke = { id: number; points: Point[]; accepted: boolean };
 	type Score = { accepted: boolean; feedback: string };
 	type StrokeData = { strokes: ExpectedStroke[] };
+	type CompletionResult = { character: string; attempts: number };
+	type Props = {
+		character: string;
+		showGuide?: boolean;
+		showIndicators?: boolean;
+		oncomplete?: (result: CompletionResult) => void;
+	};
 
 	const KANJIVG_BASE_URL = 'https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji';
 	const VIEW_BOX_SIZE = 109;
@@ -26,7 +33,7 @@
 	const MAX_SVG_LENGTH = 500_000;
 	const SVG_PATH_PATTERN = /^[MmZzLlHhVvCcSsQqTtAaEe0-9,.\s+-]*$/;
 
-	let { character }: { character: string } = $props();
+	let { character, showGuide = true, showIndicators = true, oncomplete }: Props = $props();
 
 	let data = $state.raw<StrokeData | null>(null);
 	let loading = $state(false);
@@ -158,8 +165,8 @@
 					y: point.y + perpendicular.y * offset * side
 				}));
 				const tip = indicatorPoints.at(-1)!;
-				const previous = indicatorPoints.findLast((point) => distance(point, tip) >= 0.5) ??
-					indicatorPoints[0];
+				const previous =
+					indicatorPoints.findLast((point) => distance(point, tip) >= 0.5) ?? indicatorPoints[0];
 				const tipDirection = initialDirection([previous, tip]);
 				const base = {
 					x: tip.x - tipDirection.x * 2.6,
@@ -200,13 +207,18 @@
 			.reduce((best, candidate) => (candidate.clearance > best.clearance ? candidate : best));
 		if (selected.clearance >= 0) return selected;
 
-		const bounds = [...selected.indicatorPoints, ...selected.arrowheadPoints, {
-			x: selected.labelPoint.x - badgeRadius,
-			y: selected.labelPoint.y - badgeRadius
-		}, {
-			x: selected.labelPoint.x + badgeRadius,
-			y: selected.labelPoint.y + badgeRadius
-		}];
+		const bounds = [
+			...selected.indicatorPoints,
+			...selected.arrowheadPoints,
+			{
+				x: selected.labelPoint.x - badgeRadius,
+				y: selected.labelPoint.y - badgeRadius
+			},
+			{
+				x: selected.labelPoint.x + badgeRadius,
+				y: selected.labelPoint.y + badgeRadius
+			}
+		];
 		const minX = Math.min(...bounds.map((point) => point.x));
 		const maxX = Math.max(...bounds.map((point) => point.x));
 		const minY = Math.min(...bounds.map((point) => point.y));
@@ -321,10 +333,7 @@
 				VIEW_BOX_SIZE,
 				Math.max(0, (event.clientX - rect.left - horizontalInset) / scale)
 			),
-			y: Math.min(
-				VIEW_BOX_SIZE,
-				Math.max(0, (event.clientY - rect.top - verticalInset) / scale)
-			)
+			y: Math.min(VIEW_BOX_SIZE, Math.max(0, (event.clientY - rect.top - verticalInset) / scale))
 		};
 	}
 
@@ -338,7 +347,8 @@
 			x: expected[sampleIndex].x - expected[0].x,
 			y: expected[sampleIndex].y - expected[0].y
 		};
-		const magnitude = Math.hypot(actualVector.x, actualVector.y) * Math.hypot(expectedVector.x, expectedVector.y);
+		const magnitude =
+			Math.hypot(actualVector.x, actualVector.y) * Math.hypot(expectedVector.x, expectedVector.y);
 		return magnitude === 0
 			? 1
 			: (actualVector.x * expectedVector.x + actualVector.y * expectedVector.y) / magnitude;
@@ -406,9 +416,15 @@
 
 		if (result.accepted) {
 			acceptedCount += 1;
-			feedback = acceptedCount === data.strokes.length ? `${character} completado correctamente.` : result.feedback;
+			const justCompleted = acceptedCount === data.strokes.length;
+			feedback = justCompleted
+				? `${character} completado correctamente.`
+				: showIndicators
+					? result.feedback
+					: 'Trazo aceptado.';
+			if (justCompleted) oncomplete?.({ character, attempts });
 		} else {
-			feedback = result.feedback;
+			feedback = showIndicators ? result.feedback : 'Ese trazo no coincide. Inténtalo de nuevo.';
 		}
 	}
 
@@ -465,65 +481,69 @@
 					<rect x="0.5" y="0.5" width="108" height="108" />
 					<path d="M54.5 0V109M0 54.5H109M0 0L109 109M109 0L0 109" stroke-dasharray="3 3" />
 				</g>
-				<g
-					class="stroke-muted-foreground/10"
-					fill="none"
-					stroke-width="3"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					aria-hidden="true"
-				>
-					{#each data.strokes as stroke (stroke.id)}
-						<path d={stroke.d} />
-					{/each}
-				</g>
-				<g class="pointer-events-none" aria-hidden="true">
-					{#each data.strokes as stroke, index (stroke.id)}
-						{#if index >= acceptedCount}
-							<g
-								class={index === acceptedCount
-									? 'text-primary'
-									: 'text-muted-foreground opacity-55'}
-							>
-								<polyline
-									points={pointsAttribute(stroke.indicatorPoints)}
-									fill="none"
-									stroke="currentColor"
-									stroke-width={index === acceptedCount ? 1.35 : 0.9}
-									stroke-linecap="round"
-									stroke-linejoin="round"
-								/>
-								<polyline
-									points={pointsAttribute(stroke.arrowheadPoints)}
-									fill="none"
-									stroke="currentColor"
-									stroke-width={index === acceptedCount ? 1.35 : 0.9}
-									stroke-linecap="round"
-									stroke-linejoin="round"
-								/>
-								<circle
-									cx={stroke.labelPoint.x}
-									cy={stroke.labelPoint.y}
-									r="3.4"
-									class="fill-background"
-									stroke="currentColor"
-									stroke-width={index === acceptedCount ? 1.1 : 0.75}
-								/>
-								<text
-									x={stroke.labelPoint.x}
-									y={stroke.labelPoint.y}
-									fill="currentColor"
-									font-size="4.2"
-									font-weight="700"
-									text-anchor="middle"
-									dominant-baseline="central"
+				{#if showGuide}
+					<g
+						class="stroke-muted-foreground/10"
+						fill="none"
+						stroke-width="3"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						{#each data.strokes as stroke (stroke.id)}
+							<path d={stroke.d} />
+						{/each}
+					</g>
+				{/if}
+				{#if showIndicators}
+					<g class="pointer-events-none" aria-hidden="true">
+						{#each data.strokes as stroke, index (stroke.id)}
+							{#if index >= acceptedCount}
+								<g
+									class={index === acceptedCount
+										? 'text-primary'
+										: 'text-muted-foreground opacity-55'}
 								>
-									{index + 1}
-								</text>
-							</g>
-						{/if}
-					{/each}
-				</g>
+									<polyline
+										points={pointsAttribute(stroke.indicatorPoints)}
+										fill="none"
+										stroke="currentColor"
+										stroke-width={index === acceptedCount ? 1.35 : 0.9}
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+									<polyline
+										points={pointsAttribute(stroke.arrowheadPoints)}
+										fill="none"
+										stroke="currentColor"
+										stroke-width={index === acceptedCount ? 1.35 : 0.9}
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+									<circle
+										cx={stroke.labelPoint.x}
+										cy={stroke.labelPoint.y}
+										r="3.4"
+										class="fill-background"
+										stroke="currentColor"
+										stroke-width={index === acceptedCount ? 1.1 : 0.75}
+									/>
+									<text
+										x={stroke.labelPoint.x}
+										y={stroke.labelPoint.y}
+										fill="currentColor"
+										font-size="4.2"
+										font-weight="700"
+										text-anchor="middle"
+										dominant-baseline="central"
+									>
+										{index + 1}
+									</text>
+								</g>
+							{/if}
+						{/each}
+					</g>
+				{/if}
 				{#each userStrokes as stroke (stroke.id)}
 					<polyline
 						points={pointsAttribute(stroke.points)}
@@ -557,12 +577,18 @@
 					</span>
 					<span class="text-muted-foreground">{attempts} intentos</span>
 				</div>
-				<Progress value={acceptedCount} max={totalStrokes} aria-label="Progreso de trazos correctos" />
+				<Progress
+					value={acceptedCount}
+					max={totalStrokes}
+					aria-label="Progreso de trazos correctos"
+				/>
 			</div>
 
 			<p
 				id="kana-writing-feedback"
-				class={complete ? 'min-h-5 text-sm font-medium text-primary' : 'min-h-5 text-sm text-muted-foreground'}
+				class={complete
+					? 'min-h-5 text-sm font-medium text-primary'
+					: 'min-h-5 text-sm text-muted-foreground'}
 				aria-live="polite"
 			>
 				{feedback}

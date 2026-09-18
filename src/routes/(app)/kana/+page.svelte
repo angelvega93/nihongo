@@ -13,6 +13,7 @@
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import CheckCheckIcon from '@lucide/svelte/icons/check-check';
+	import Gamepad2Icon from '@lucide/svelte/icons/gamepad-2';
 	import LanguagesIcon from '@lucide/svelte/icons/languages';
 	import ShuffleIcon from '@lucide/svelte/icons/shuffle';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -149,7 +150,8 @@
 	function randomFocus() {
 		if (!current || selectedKana.length < 2) return;
 		const alternatives = selectedKana.filter((item) => item.character !== current.character);
-		focusedByScript[script] = alternatives[Math.floor(Math.random() * alternatives.length)].character;
+		focusedByScript[script] =
+			alternatives[Math.floor(Math.random() * alternatives.length)].character;
 	}
 </script>
 
@@ -240,7 +242,13 @@
 				<h1 class="text-2xl font-semibold tracking-normal">Kana</h1>
 				<p class="text-sm text-muted-foreground">Silabarios básicos</p>
 			</div>
-			<Badge variant="outline">{selectedKana.length} de 46</Badge>
+			<div class="flex items-center gap-2">
+				<Badge variant="outline">{selectedKana.length} de 46</Badge>
+				<Button href={resolve('/kana/practica')}>
+					<Gamepad2Icon data-icon="inline-start" />
+					Ir a práctica
+				</Button>
+			</div>
 		</div>
 
 		<div class="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">

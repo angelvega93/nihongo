@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import FuriganaText from '$lib/components/furigana-text.svelte';
 	import TokenizedJapanese from '$lib/components/tokenized-japanese.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -14,6 +15,7 @@
 	import { rowToFsrsCard } from '$lib/fsrs/card';
 	import { createReviewSnapshot } from '$lib/fsrs/preview';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import MessagesSquareIcon from '@lucide/svelte/icons/messages-square';
 	import UndoIcon from '@lucide/svelte/icons/undo-2';
 	import { untrack } from 'svelte';
 	import { Rating, State, show_diff_message, type Grade } from 'ts-fsrs';
@@ -242,20 +244,26 @@
 			</Breadcrumb.List>
 		</Breadcrumb.Root>
 	</div>
-	{#if !done}
-		<div class="flex items-center gap-2">
-			<Badge variant="outline">
-				Nuevas: <span class="font-medium text-foreground">{stateCounts.new}</span>
-			</Badge>
-			<Badge variant="outline">
-				Aprendiendo: <span class="font-medium text-foreground">{stateCounts.learning}</span>
-			</Badge>
-			<Badge variant="outline">
-				Revisión: <span class="font-medium text-foreground">{stateCounts.review}</span>
-			</Badge>
-			<Badge variant="secondary">{completed + (current ? 1 : 0)} / {total}</Badge>
-		</div>
-	{/if}
+	<div class="flex items-center gap-2">
+		<Button href={resolve('/practica/ia')} variant="outline" size="sm">
+			<MessagesSquareIcon data-icon="inline-start" />
+			Conversación IA
+		</Button>
+		{#if !done}
+			<div class="flex items-center gap-2">
+				<Badge variant="outline">
+					Nuevas: <span class="font-medium text-foreground">{stateCounts.new}</span>
+				</Badge>
+				<Badge variant="outline">
+					Aprendiendo: <span class="font-medium text-foreground">{stateCounts.learning}</span>
+				</Badge>
+				<Badge variant="outline">
+					Revisión: <span class="font-medium text-foreground">{stateCounts.review}</span>
+				</Badge>
+				<Badge variant="secondary">{completed + (current ? 1 : 0)} / {total}</Badge>
+			</div>
+		{/if}
+	</div>
 </header>
 
 <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-6">

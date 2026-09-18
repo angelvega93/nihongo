@@ -1,4 +1,4 @@
-import { OPENROUTER_API_KEY, OPENROUTER_MODEL } from '$app/env/private';
+import { OPENROUTER_API_KEY } from '$app/env/private';
 import { error, json } from '@sveltejs/kit';
 import { z } from 'zod';
 import type { RequestHandler } from './$types';
@@ -10,14 +10,6 @@ const messageSchema = z.object({
 
 const requestSchema = z.object({
   messages: z.array(messageSchema).min(1).max(12)
-});
-
-const openRouterResponseSchema = z.object({
-  choices: z.array(
-    z.object({
-      message: z.object({ content: z.string() })
-    })
-  )
 });
 
 const SYSTEM_PROMPT = `Eres Aiko, una profesora de japonés paciente, clara y profesional. Das clases a estudiantes hispanohablantes de nivel principiante-intermedio.

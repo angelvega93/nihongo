@@ -7,6 +7,18 @@ export type Kana = {
 	romaji: string;
 };
 
+/** Metadata for each silabary, used to build tabs and labels. */
+export const KANA_SCRIPTS: { id: KanaScript; label: string }[] = [
+	{ id: 'hiragana', label: 'Hiragana' },
+	{ id: 'katakana', label: 'Katakana' }
+];
+
+export const KANA_SCRIPT_IDS: KanaScript[] = KANA_SCRIPTS.map((entry) => entry.id);
+
+export function isKanaScript(value: unknown): value is KanaScript {
+	return value === 'hiragana' || value === 'katakana';
+}
+
 export type KanaRow = {
 	id: string;
 	label: string;
@@ -44,6 +56,26 @@ export const KANA_ROWS: KanaRow[] = ROW_DEFINITIONS.map(([id, label, entries]) =
 }));
 
 export const BASIC_KANA: Kana[] = KANA_ROWS.flatMap((row) => row.kana);
+
+/** Every kana of a script, in table order. */
+export function allKanaForScript(_script: KanaScript): Kana[] {
+	return BASIC_KANA;
+}
+
+/** The first row (vowels) of a script, used as the default selection. */
+export function starterSelection(script: KanaScript): string[] {
+	return KANA_ROWS[0].kana.map((kana) => kanaCharacter(kana, script));
+}
+
+/** Look up a kana by its stable id (`romaji`). */
+export function kanaById(id: string): Kana | undefined {
+	return BASIC_KANA.find((kana) => kana.id === id);
+}
+
+/** Human-readable label for a script. */
+export function scriptLabel(script: KanaScript): string {
+	return KANA_SCRIPTS.find((entry) => entry.id === script)?.label ?? script;
+}
 
 export const VOCABULARY: VocabularyWord[] = [
 	{ id: 'cat', hiragana: 'ねこ', romaji: 'neko', meaning: 'gato' },

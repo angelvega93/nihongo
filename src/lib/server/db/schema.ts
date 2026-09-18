@@ -10,3 +10,4 @@ export * from './auth.schema';
 export * from './fsrs.schema';
 export * from './course.schema';
 export * from './dictionary.schema';
+export * from './kana.schema';

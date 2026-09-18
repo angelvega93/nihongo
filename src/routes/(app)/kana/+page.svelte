@@ -104,6 +104,7 @@
 							<Button
 								variant={isCurrent ? 'secondary' : 'outline'}
 								class="h-16 min-w-0 flex-col gap-0 px-1 data-[current=true]:ring-2 data-[current=true]:ring-primary"
+								style="grid-column: {item.column + 1}"
 								data-current={isCurrent}
 								aria-current={isCurrent ? 'true' : undefined}
 								aria-label={`${character}, ${item.romaji}, ${masteryLabel(mastery)}`}

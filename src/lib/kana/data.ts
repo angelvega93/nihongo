@@ -5,6 +5,8 @@ export type Kana = {
 	hiragana: string;
 	katakana: string;
 	romaji: string;
+	/** Column in the gojūon table (0 = a, 1 = i, 2 = u, 3 = e, 4 = o). */
+	column: number;
 };
 
 /** Metadata for each silabary, used to build tabs and labels. */
@@ -46,14 +48,26 @@ const ROW_DEFINITIONS = [
 	['final-n', 'N final', 'ん:ン:n']
 ] as const;
 
-export const KANA_ROWS: KanaRow[] = ROW_DEFINITIONS.map(([id, label, entries]) => ({
-	id,
-	label,
-	kana: entries.split(',').map((entry) => {
-		const [hiragana, katakana, romaji] = entry.split(':');
-		return { id: romaji, hiragana, katakana, romaji };
-	})
-}));
+/**
+ * Explicit column for rows whose kana do not fill the five vowel columns.
+ * Ya keeps や (a), ゆ (u) and よ (o); Wa keeps わ (a) and を (o).
+ */
+const ROW_COLUMNS: Record<string, number[]> = {
+	y: [0, 2, 4],
+	w: [0, 4]
+};
+
+export const KANA_ROWS: KanaRow[] = ROW_DEFINITIONS.map(([id, label, entries]) => {
+	const columns = ROW_COLUMNS[id];
+	return {
+		id,
+		label,
+		kana: entries.split(',').map((entry, index) => {
+			const [hiragana, katakana, romaji] = entry.split(':');
+			return { id: romaji, hiragana, katakana, romaji, column: columns?.[index] ?? index };
+		})
+	};
+});
 
 export const BASIC_KANA: Kana[] = KANA_ROWS.flatMap((row) => row.kana);
 

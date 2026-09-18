@@ -32,6 +32,7 @@
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import ShuffleIcon from '@lucide/svelte/icons/shuffle';
 	import VolumeXIcon from '@lucide/svelte/icons/volume-x';
+	import type { Attachment } from 'svelte/attachments';
 
 	type Mode = 'quiz' | 'listen' | 'draw' | 'word-choice' | 'pairs' | 'writing' | 'formation';
 	type Feedback = { kind: 'correct' | 'wrong' | 'info'; text: string };
@@ -95,23 +96,25 @@
 		selectedFormationIds.flatMap((id) => formationTiles.filter((tile) => tile.id === id))
 	);
 
-	$effect(() => {
-		quizSerial;
-		if (mode !== 'quiz' || quizLocked) return;
+	function quizTimer(activeMode: Mode, locked: boolean, serial: number): Attachment {
+		return () => {
+			void serial;
+			if (activeMode !== 'quiz' || locked) return;
 
-		remaining = QUIZ_SECONDS;
-		const timer = window.setInterval(() => {
-			if (remaining <= 1) {
-				window.clearInterval(timer);
-				remaining = 0;
-				finishQuizTimeout();
-				return;
-			}
-			remaining -= 1;
-		}, 1000);
+			remaining = QUIZ_SECONDS;
+			const timer = window.setInterval(() => {
+				if (remaining <= 1) {
+					window.clearInterval(timer);
+					remaining = 0;
+					finishQuizTimeout();
+					return;
+				}
+				remaining -= 1;
+			}, 1000);
 
-		return () => window.clearInterval(timer);
-	});
+			return () => window.clearInterval(timer);
+		};
+	}
 
 	function recordOutcome(isCorrect: boolean, text: string) {
 		attempted += 1;
@@ -180,6 +183,12 @@
 		if (drawComplete) return;
 		drawComplete = true;
 		recordOutcome(true, 'Kana completado con trazos válidos.');
+	}
+
+	function failDrawing() {
+		attempted += 1;
+		streak = 0;
+		feedback = null;
 	}
 
 	function newWordChoice() {
@@ -354,7 +363,10 @@
 		</Breadcrumb.Root>
 	</header>
 
-	<main class="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8">
+	<main
+		class="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 p-4 sm:p-6 lg:p-8"
+		{@attach quizTimer(mode, quizLocked, quizSerial)}
+	>
 		<div class="flex flex-wrap items-start justify-between gap-4">
 			<div class="flex flex-col gap-1">
 				<h1 class="text-2xl font-semibold tracking-normal">Práctica de kana</h1>
@@ -498,7 +510,9 @@
 									character={kanaCharacter(drawTarget, script)}
 									showGuide={false}
 									showIndicators={false}
+									evaluationMode="deferred"
 									oncomplete={finishDrawing}
+									onfailed={failDrawing}
 								/>
 							{/key}
 						</div>
@@ -618,7 +632,7 @@
 					)}
 					aria-live="polite"
 				>
-					{feedback?.text ?? 'Completa el ejercicio para ver el resultado.'}
+					{feedback?.text ?? (mode === 'draw' ? '' : 'Completa el ejercicio para ver el resultado.')}
 				</p>
 				{#if (mode === 'quiz' && quizLocked) || (mode === 'listen' && listenLocked) || (mode === 'draw' && drawComplete) || (mode === 'word-choice' && wordLocked) || (mode === 'writing' && writingLocked) || (mode === 'formation' && formationLocked)}
 					<Button onclick={newRound}>Siguiente</Button>

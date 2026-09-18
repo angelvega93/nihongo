@@ -16,24 +16,46 @@
 		labelPoint: Point;
 		arrowheadPoints: Point[];
 	};
-	type UserStroke = { id: number; points: Point[]; accepted: boolean };
+	type UserStroke = { id: number; points: Point[]; accepted: boolean | null };
 	type Score = { accepted: boolean; feedback: string };
+	type AggregateScore = {
+		accepted: boolean;
+		averageDirection: number;
+		averageShapeError: number;
+		averageLengthError: number;
+		globalDistance: number;
+	};
 	type StrokeData = { strokes: ExpectedStroke[] };
 	type CompletionResult = { character: string; attempts: number };
 	type Props = {
 		character: string;
 		showGuide?: boolean;
 		showIndicators?: boolean;
+		evaluationMode?: 'immediate' | 'deferred';
 		oncomplete?: (result: CompletionResult) => void;
+		onfailed?: (result: CompletionResult) => void;
 	};
 
 	const KANJIVG_BASE_URL = 'https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji';
 	const VIEW_BOX_SIZE = 109;
 	const SAMPLE_COUNT = 32;
+	const MIN_STROKE_LENGTH = 6;
+	const MIN_AVERAGE_DIRECTION = 0.03;
+	const MAX_AVERAGE_SHAPE_ERROR = 0.22;
+	const MAX_AVERAGE_LENGTH_ERROR = 0.85;
+	const MAX_GLOBAL_DISTANCE = 0.12;
+	const SEVERE_REVERSED_DIRECTION = -0.8;
 	const MAX_SVG_LENGTH = 500_000;
 	const SVG_PATH_PATTERN = /^[MmZzLlHhVvCcSsQqTtAaEe0-9,.\s+-]*$/;
 
-	let { character, showGuide = true, showIndicators = true, oncomplete }: Props = $props();
+	let {
+		character,
+		showGuide = true,
+		showIndicators = true,
+		evaluationMode = 'immediate',
+		oncomplete,
+		onfailed
+	}: Props = $props();
 
 	let data = $state.raw<StrokeData | null>(null);
 	let loading = $state(false);
@@ -43,6 +65,7 @@
 	let acceptedCount = $state(0);
 	let attempts = $state(0);
 	let feedback = $state('Dibuja el primer trazo.');
+	let deferredGrade = $state<boolean | null>(null);
 	let activePointerId: number | null = null;
 	let nextStrokeId = 0;
 
@@ -56,7 +79,11 @@
 			: `${KANJIVG_BASE_URL}/${codePoint.toString(16).padStart(5, '0')}.svg`
 	);
 	const totalStrokes = $derived(data?.strokes.length ?? 0);
-	const complete = $derived(totalStrokes > 0 && acceptedCount === totalStrokes);
+	const drawnCount = $derived(evaluationMode === 'deferred' ? userStrokes.length : acceptedCount);
+	const complete = $derived(
+		totalStrokes > 0 &&
+			(evaluationMode === 'deferred' ? deferredGrade === true : acceptedCount === totalStrokes)
+	);
 
 	function distance(first: Point, second: Point) {
 		return Math.hypot(first.x - second.x, first.y - second.y);
@@ -281,9 +308,18 @@
 		currentPoints = [];
 		acceptedCount = 0;
 		attempts = 0;
-		feedback = 'Dibuja el primer trazo.';
+		feedback = evaluationMode === 'deferred' ? '' : 'Dibuja el primer trazo.';
+		deferredGrade = null;
 		activePointerId = null;
 		nextStrokeId = 0;
+	}
+
+	function retryDeferred() {
+		userStrokes = [];
+		currentPoints = [];
+		feedback = '';
+		deferredGrade = null;
+		activePointerId = null;
 	}
 
 	function loadStrokeData(url: string | null): Attachment {
@@ -337,53 +373,182 @@
 		};
 	}
 
+	function normalizeStroke(points: Point[]) {
+		const origin = points[0];
+		const scale = polylineLength(points);
+		// Preserve orientation: normalize translation and uniform scale only, never rotation.
+		return points.map((point) => ({
+			x: (point.x - origin.x) / scale,
+			y: (point.y - origin.y) / scale
+		}));
+	}
+
+	function vectorSimilarity(actual: Point, expected: Point) {
+		const actualMagnitude = Math.hypot(actual.x, actual.y);
+		const expectedMagnitude = Math.hypot(expected.x, expected.y);
+		if (expectedMagnitude < 0.04) return null;
+		if (actualMagnitude < 0.04) return -1;
+		return (actual.x * expected.x + actual.y * expected.y) / (actualMagnitude * expectedMagnitude);
+	}
+
 	function directionSimilarity(actual: Point[], expected: Point[]) {
-		const sampleIndex = 7;
-		const actualVector = {
-			x: actual[sampleIndex].x - actual[0].x,
-			y: actual[sampleIndex].y - actual[0].y
-		};
-		const expectedVector = {
-			x: expected[sampleIndex].x - expected[0].x,
-			y: expected[sampleIndex].y - expected[0].y
-		};
-		const magnitude =
-			Math.hypot(actualVector.x, actualVector.y) * Math.hypot(expectedVector.x, expectedVector.y);
-		return magnitude === 0
-			? 1
-			: (actualVector.x * expectedVector.x + actualVector.y * expectedVector.y) / magnitude;
+		const earlyIndex = 7;
+		const vector = (points: Point[], index: number) => ({
+			x: points[index].x - points[0].x,
+			y: points[index].y - points[0].y
+		});
+		const early = vectorSimilarity(vector(actual, earlyIndex), vector(expected, earlyIndex));
+		const overall = vectorSimilarity(
+			vector(actual, actual.length - 1),
+			vector(expected, expected.length - 1)
+		);
+
+		if (early === null) return overall ?? 1;
+		if (overall === null) return early;
+		return early * 0.65 + overall * 0.35;
+	}
+
+	function centroid(points: Point[]) {
+		const total = points.reduce(
+			(sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+			{ x: 0, y: 0 }
+		);
+		return { x: total.x / points.length, y: total.y / points.length };
 	}
 
 	function scoreStroke(points: Point[], expected: ExpectedStroke): Score {
 		const actualLength = polylineLength(points);
-		if (actualLength < 6 || points.length < 3) {
+		if (actualLength < MIN_STROKE_LENGTH || points.length < 3) {
 			return { accepted: false, feedback: 'Trazo demasiado corto. Inténtalo de nuevo.' };
 		}
 
 		const actual = resamplePolyline(points, SAMPLE_COUNT);
+		const normalizedActual = normalizeStroke(actual);
+		const normalizedExpected = normalizeStroke(expected.points);
 		const startDistance = distance(actual[0], expected.points[0]);
-		const endDistance = distance(actual.at(-1)!, expected.points.at(-1)!);
-		const direction = directionSimilarity(actual, expected.points);
+		const centroidDistance = distance(centroid(actual), centroid(expected.points));
+		const direction = directionSimilarity(normalizedActual, normalizedExpected);
 		const normalizedShapeDistance =
-			actual.reduce((sum, point, index) => sum + distance(point, expected.points[index]), 0) /
-			(SAMPLE_COUNT * VIEW_BOX_SIZE);
+			normalizedActual.reduce(
+				(sum, point, index) => sum + distance(point, normalizedExpected[index]),
+				0
+			) / SAMPLE_COUNT;
 		const lengthRatio = actualLength / expected.length;
 
-		// Position gates use KanjiVG units; shape error is the normalized mean of 32 paired samples.
-		if (startDistance > 18) return { accepted: false, feedback: 'Empieza más cerca del inicio.' };
-		if (direction < 0.15) return { accepted: false, feedback: 'Revisa la dirección del trazo.' };
-		if (endDistance > 22) return { accepted: false, feedback: 'Termina más cerca del final.' };
-		if (lengthRatio < 0.45 || lengthRatio > 2.2) {
+		if (startDistance > 38 && centroidDistance > 38) {
+			return { accepted: false, feedback: 'Dibuja el trazo en la zona correcta.' };
+		}
+		if (direction < 0.05) return { accepted: false, feedback: 'Revisa la dirección del trazo.' };
+		if (lengthRatio < 0.35 || lengthRatio > 2.6) {
 			return { accepted: false, feedback: 'Ajusta la longitud del trazo.' };
 		}
-		if (normalizedShapeDistance > 0.12) {
-			return { accepted: false, feedback: 'Sigue mejor la forma del trazo.' };
+		if (normalizedShapeDistance > 0.16) {
+			return { accepted: false, feedback: 'Revisa el orden y la forma del trazo.' };
 		}
 		return { accepted: true, feedback: 'Trazo correcto.' };
 	}
 
+	function boundsDiagonal(points: Point[]) {
+		const xs = points.map((point) => point.x);
+		const ys = points.map((point) => point.y);
+		return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+	}
+
+	function scoreCharacter(strokes: UserStroke[], expectedStrokes: ExpectedStroke[]): AggregateScore {
+		if (strokes.length !== expectedStrokes.length || strokes.length === 0) {
+			return {
+				accepted: false,
+				averageDirection: -1,
+				averageShapeError: Number.POSITIVE_INFINITY,
+				averageLengthError: Number.POSITIVE_INFINITY,
+				globalDistance: Number.POSITIVE_INFINITY
+			};
+		}
+
+		const directions: number[] = [];
+		const shapeErrors: number[] = [];
+		const lengthErrors: number[] = [];
+		const allActual: Point[] = [];
+		const allExpected: Point[] = [];
+
+		// Pair by strict stroke index; expected strokes are never searched or permuted.
+		for (const [index, stroke] of strokes.entries()) {
+			const actualLength = polylineLength(stroke.points);
+			const expected = expectedStrokes[index];
+			if (stroke.points.length < 3 || actualLength < MIN_STROKE_LENGTH || !expected) {
+				return {
+					accepted: false,
+					averageDirection: -1,
+					averageShapeError: Number.POSITIVE_INFINITY,
+					averageLengthError: Number.POSITIVE_INFINITY,
+					globalDistance: Number.POSITIVE_INFINITY
+				};
+			}
+
+			const actual = resamplePolyline(stroke.points, SAMPLE_COUNT);
+			const normalizedActual = normalizeStroke(actual);
+			const normalizedExpected = normalizeStroke(expected.points);
+			directions.push(directionSimilarity(normalizedActual, normalizedExpected));
+			shapeErrors.push(
+				normalizedActual.reduce(
+					(sum, point, pointIndex) => sum + distance(point, normalizedExpected[pointIndex]),
+					0
+				) / SAMPLE_COUNT
+			);
+			lengthErrors.push(Math.abs(Math.log(actualLength / expected.length)));
+			allActual.push(...actual);
+			allExpected.push(...expected.points);
+		}
+
+		const average = (values: number[]) =>
+			values.reduce((sum, value) => sum + value, 0) / values.length;
+		const actualCenter = centroid(allActual);
+		const expectedCenter = centroid(allExpected);
+		// Align drawing centroids and bounds with translation plus one uniform scale, never rotation.
+		const actualDiagonal = boundsDiagonal(allActual);
+		const expectedDiagonal = boundsDiagonal(allExpected);
+		const globalScale = actualDiagonal === 0 ? 0 : expectedDiagonal / actualDiagonal;
+		const globalDistance =
+			allActual.reduce((sum, point, index) => {
+				const aligned = {
+					x: expectedCenter.x + (point.x - actualCenter.x) * globalScale,
+					y: expectedCenter.y + (point.y - actualCenter.y) * globalScale
+				};
+				return sum + distance(aligned, allExpected[index]);
+			}, 0) /
+			allActual.length /
+			VIEW_BOX_SIZE;
+		const averageDirection = average(directions);
+		const averageShapeError = average(shapeErrors);
+		const averageLengthError = average(lengthErrors);
+		const hasSeverelyReversedStroke = directions.some(
+			(direction) => direction < SEVERE_REVERSED_DIRECTION
+		);
+
+		return {
+			accepted:
+				!hasSeverelyReversedStroke &&
+				averageDirection >= MIN_AVERAGE_DIRECTION &&
+				averageShapeError <= MAX_AVERAGE_SHAPE_ERROR &&
+				averageLengthError <= MAX_AVERAGE_LENGTH_ERROR &&
+				globalDistance <= MAX_GLOBAL_DISTANCE,
+			averageDirection,
+			averageShapeError,
+			averageLengthError,
+			globalDistance
+		};
+	}
+
 	function handlePointerDown(event: PointerEvent) {
-		if (!data || complete || loading || activePointerId !== null) return;
+		if (
+			!data ||
+			complete ||
+			loading ||
+			activePointerId !== null ||
+			(evaluationMode === 'deferred' &&
+				(deferredGrade !== null || userStrokes.length >= data.strokes.length))
+		)
+			return;
 		if (event.pointerType === 'mouse' && event.button !== 0) return;
 		const svg = event.currentTarget as SVGSVGElement;
 		activePointerId = event.pointerId;
@@ -406,6 +571,14 @@
 
 		const points = currentPoints;
 		currentPoints = [];
+		if (evaluationMode === 'deferred') {
+			if (points.length < 3 || polylineLength(points) < MIN_STROKE_LENGTH) return;
+			userStrokes = [...userStrokes, { id: nextStrokeId, points, accepted: null }];
+			nextStrokeId += 1;
+			return;
+		}
+
+		// Strict order invariant: score only the next expected KanjiVG stroke.
 		const expected = data.strokes[acceptedCount];
 		if (!expected || points.length === 0) return;
 
@@ -424,8 +597,28 @@
 					: 'Trazo aceptado.';
 			if (justCompleted) oncomplete?.({ character, attempts });
 		} else {
-			feedback = showIndicators ? result.feedback : 'Ese trazo no coincide. Inténtalo de nuevo.';
+			feedback = showIndicators ? result.feedback : 'Revisa el orden y la forma del trazo.';
 		}
+	}
+
+	function checkDeferred() {
+		if (
+			evaluationMode !== 'deferred' ||
+			!data ||
+			deferredGrade !== null ||
+			userStrokes.length !== data.strokes.length
+		)
+			return;
+
+		attempts += 1;
+		const result = scoreCharacter(userStrokes, data.strokes);
+		deferredGrade = result.accepted;
+		userStrokes = userStrokes.map((stroke) => ({ ...stroke, accepted: result.accepted }));
+		feedback = result.accepted
+			? `${character} completado correctamente.`
+			: 'El carácter completo no coincide. Revisa el orden, la dirección y la forma.';
+		if (result.accepted) oncomplete?.({ character, attempts });
+		else onfailed?.({ character, attempts });
 	}
 
 	function cancelPointer(event: PointerEvent) {
@@ -435,6 +628,14 @@
 	}
 
 	function undoLastAccepted() {
+		if (evaluationMode === 'deferred') {
+			if (userStrokes.length === 0) return;
+			userStrokes = userStrokes.slice(0, -1).map((stroke) => ({ ...stroke, accepted: null }));
+			deferredGrade = null;
+			feedback = '';
+			return;
+		}
+
 		const lastAcceptedIndex = userStrokes.findLastIndex((stroke) => stroke.accepted);
 		if (lastAcceptedIndex < 0) return;
 		userStrokes = userStrokes.filter((_, index) => index !== lastAcceptedIndex);
@@ -495,7 +696,7 @@
 						{/each}
 					</g>
 				{/if}
-				{#if showIndicators}
+				{#if showIndicators && evaluationMode === 'immediate'}
 					<g class="pointer-events-none" aria-hidden="true">
 						{#each data.strokes as stroke, index (stroke.id)}
 							{#if index >= acceptedCount}
@@ -547,7 +748,11 @@
 				{#each userStrokes as stroke (stroke.id)}
 					<polyline
 						points={pointsAttribute(stroke.points)}
-						class={stroke.accepted ? 'stroke-primary' : 'stroke-destructive'}
+						class={stroke.accepted === null
+							? 'stroke-foreground'
+							: stroke.accepted
+								? 'stroke-primary'
+								: 'stroke-destructive'}
 						fill="none"
 						stroke-width="4"
 						stroke-linecap="round"
@@ -573,34 +778,53 @@
 			<div class="flex flex-col gap-1.5">
 				<div class="flex items-center justify-between gap-3 text-sm tabular-nums">
 					<span class={complete ? 'font-medium text-primary' : 'text-muted-foreground'}>
-						{acceptedCount} de {totalStrokes} trazos
+						{drawnCount} de {totalStrokes} trazos{evaluationMode === 'deferred'
+							? ' dibujados'
+							: ''}
 					</span>
 					<span class="text-muted-foreground">{attempts} intentos</span>
 				</div>
 				<Progress
-					value={acceptedCount}
+					value={drawnCount}
 					max={totalStrokes}
-					aria-label="Progreso de trazos correctos"
+					aria-label={evaluationMode === 'deferred'
+						? 'Progreso de trazos dibujados'
+						: 'Progreso de trazos correctos'}
 				/>
 			</div>
 
 			<p
 				id="kana-writing-feedback"
-				class={complete
-					? 'min-h-5 text-sm font-medium text-primary'
-					: 'min-h-5 text-sm text-muted-foreground'}
+				class={deferredGrade === false
+					? 'min-h-5 text-sm font-medium text-destructive'
+					: complete
+						? 'min-h-5 text-sm font-medium text-primary'
+						: 'min-h-5 text-sm text-muted-foreground'}
 				aria-live="polite"
 			>
 				{feedback}
 			</p>
 
 			<div class="flex flex-wrap gap-2">
+				{#if evaluationMode === 'deferred'}
+					{#if deferredGrade === false}
+						<Button size="sm" onclick={retryDeferred}>Reintentar</Button>
+					{:else}
+						<Button
+							size="sm"
+							disabled={userStrokes.length !== totalStrokes || deferredGrade !== null}
+							onclick={checkDeferred}>Comprobar</Button
+						>
+					{/if}
+				{/if}
 				<Button
 					variant="outline"
 					size="sm"
-					disabled={acceptedCount === 0}
+					disabled={evaluationMode === 'deferred' ? userStrokes.length === 0 : acceptedCount === 0}
 					onclick={undoLastAccepted}
-					aria-label="Deshacer el último trazo correcto"
+					aria-label={evaluationMode === 'deferred'
+						? 'Deshacer el último trazo dibujado'
+						: 'Deshacer el último trazo correcto'}
 				>
 					<Undo2Icon data-icon="inline-start" aria-hidden="true" />
 					Deshacer

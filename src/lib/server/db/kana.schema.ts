@@ -3,6 +3,7 @@ import {
 	index,
 	integer,
 	pgTable,
+	primaryKey,
 	serial,
 	smallint,
 	text,
@@ -49,6 +50,38 @@ export const kanaProgress = pgTable(
 export const kanaProgressRelations = relations(kanaProgress, ({ one }) => ({
 	user: one(user, {
 		fields: [kanaProgress.userId],
+		references: [user.id]
+	})
+}));
+
+/**
+ * Per-user completion of a guided kana lesson. The lesson catalog itself is
+ * static (see `$lib/kana/lessons.ts`), so only the lesson id and status are
+ * stored; `lessonSlug` is the stable id of the lesson.
+ */
+export const kanaLessonProgress = pgTable(
+	'kana_lesson_progress',
+	{
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		lessonSlug: text('lesson_slug').notNull(),
+		status: smallint('status').notNull().default(0),
+		completedAt: timestamp('completed_at'),
+		updatedAt: timestamp('updated_at')
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull()
+	},
+	(table) => [
+		primaryKey({ columns: [table.userId, table.lessonSlug] }),
+		index('kana_lesson_progress_user_id_idx').on(table.userId)
+	]
+);
+
+export const kanaLessonProgressRelations = relations(kanaLessonProgress, ({ one }) => ({
+	user: one(user, {
+		fields: [kanaLessonProgress.userId],
 		references: [user.id]
 	})
 }));

@@ -1,8 +1,9 @@
 import { db } from '$lib/server/db';
-import { kanaProgress } from '$lib/server/db/schema';
+import { kanaLessonProgress, kanaProgress } from '$lib/server/db/schema';
 import { applyAttempt, progressKey, KanaMastery, type KanaProgressMap } from '$lib/kana/progress';
 import { isKanaScript, kanaById, type KanaScript } from '$lib/kana/data';
 import { and, eq } from 'drizzle-orm';
+import { ProgressStatus } from '$lib/types/course';
 
 /** A single attempt to persist. */
 export type KanaAttempt = {
@@ -111,6 +112,45 @@ export class KanaService {
 				)
 			);
 		return rows.length;
+	}
+
+	/** Completed guided-lesson slugs of a user, keyed by lesson slug. */
+	async getLessonProgress(userId: string): Promise<Record<string, ProgressStatus>> {
+		const rows = await db
+			.select({ lessonSlug: kanaLessonProgress.lessonSlug, status: kanaLessonProgress.status })
+			.from(kanaLessonProgress)
+			.where(eq(kanaLessonProgress.userId, userId));
+
+		const map: Record<string, ProgressStatus> = {};
+		for (const row of rows) {
+			map[row.lessonSlug] = row.status as ProgressStatus;
+		}
+		return map;
+	}
+
+	/** Mark a guided kana lesson as completed, upserting the row. */
+	async completeLesson(userId: string, lessonSlug: string): Promise<void> {
+		const now = new Date();
+		await db
+			.insert(kanaLessonProgress)
+			.values({
+				userId,
+				lessonSlug,
+				status: ProgressStatus.Completed,
+				completedAt: now
+			})
+			.onConflictDoUpdate({
+				target: [kanaLessonProgress.userId, kanaLessonProgress.lessonSlug],
+				set: { status: ProgressStatus.Completed, completedAt: now, updatedAt: now }
+			});
+	}
+
+	/** Clear completion for one guided lesson, or for all of them. */
+	async resetLessonProgress(userId: string, lessonSlug?: string): Promise<void> {
+		const where = lessonSlug
+			? and(eq(kanaLessonProgress.userId, userId), eq(kanaLessonProgress.lessonSlug, lessonSlug))
+			: eq(kanaLessonProgress.userId, userId);
+		await db.delete(kanaLessonProgress).where(where);
 	}
 }
 

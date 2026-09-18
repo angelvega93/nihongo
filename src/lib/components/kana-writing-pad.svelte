@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
+	import CheckIcon from '@lucide/svelte/icons/check';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Undo2Icon from '@lucide/svelte/icons/undo-2';
+	import XIcon from '@lucide/svelte/icons/x';
 	import type { Attachment } from 'svelte/attachments';
 
 	type Point = { x: number; y: number };
@@ -31,6 +33,12 @@
 		character: string;
 		showGuide?: boolean;
 		showIndicators?: boolean;
+		/** Hide the stroke counter, progress bar and feedback text. */
+		showProgress?: boolean;
+		/** Hide the built-in Comprobar/Reintentar buttons. */
+		showCheckButton?: boolean;
+		/** When set, plays a green/red result animation over the canvas. */
+		gradeAnimation?: 'correct' | 'incorrect' | null;
 		evaluationMode?: 'immediate' | 'deferred';
 		oncomplete?: (result: CompletionResult) => void;
 		onfailed?: (result: CompletionResult) => void;
@@ -52,6 +60,9 @@
 		character,
 		showGuide = true,
 		showIndicators = true,
+		showProgress = true,
+		showCheckButton = true,
+		gradeAnimation = null,
 		evaluationMode = 'immediate',
 		oncomplete,
 		onfailed
@@ -409,10 +420,10 @@
 	}
 
 	function centroid(points: Point[]) {
-		const total = points.reduce(
-			(sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
-			{ x: 0, y: 0 }
-		);
+		const total = points.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), {
+			x: 0,
+			y: 0
+		});
 		return { x: total.x / points.length, y: total.y / points.length };
 	}
 
@@ -454,7 +465,10 @@
 		return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
 	}
 
-	function scoreCharacter(strokes: UserStroke[], expectedStrokes: ExpectedStroke[]): AggregateScore {
+	function scoreCharacter(
+		strokes: UserStroke[],
+		expectedStrokes: ExpectedStroke[]
+	): AggregateScore {
 		if (strokes.length !== expectedStrokes.length || strokes.length === 0) {
 			return {
 				accepted: false,
@@ -601,14 +615,9 @@
 		}
 	}
 
-	function checkDeferred() {
-		if (
-			evaluationMode !== 'deferred' ||
-			!data ||
-			deferredGrade !== null ||
-			userStrokes.length !== data.strokes.length
-		)
-			return;
+	function checkDeferred(): boolean | null {
+		if (evaluationMode !== 'deferred' || !data || userStrokes.length !== data.strokes.length)
+			return null;
 
 		attempts += 1;
 		const result = scoreCharacter(userStrokes, data.strokes);
@@ -619,6 +628,20 @@
 			: 'El carácter completo no coincide. Revisa el orden, la dirección y la forma.';
 		if (result.accepted) oncomplete?.({ character, attempts });
 		else onfailed?.({ character, attempts });
+		return result.accepted;
+	}
+
+	/**
+	 * Grade the deferred drawing on demand. Returns `null` when the drawing is
+	 * not ready (wrong mode, still loading, or not every stroke drawn yet).
+	 */
+	export function check(): boolean | null {
+		return checkDeferred();
+	}
+
+	/** Clear every stroke and start the practice over. */
+	export function reset() {
+		resetPractice();
 	}
 
 	function cancelPointer(event: PointerEvent) {
@@ -651,7 +674,7 @@
 <figure
 	class="flex w-full flex-col gap-3"
 	aria-busy={loading}
-	aria-describedby="kana-writing-feedback"
+	aria-describedby={showProgress ? 'kana-writing-feedback' : undefined}
 	{@attach loadStrokeData(sourceUrl)}
 >
 	<div class="relative aspect-square w-full overflow-hidden rounded-lg border bg-background">
@@ -771,42 +794,66 @@
 				{/if}
 			</svg>
 		{/if}
+		{#if gradeAnimation}
+			<div
+				class="pointer-events-none absolute inset-0 grid place-items-center {gradeAnimation ===
+				'correct'
+					? 'bg-emerald-500/15'
+					: 'bg-rose-500/15'}"
+				aria-hidden="true"
+			>
+				<div
+					class="grade-pop grid size-20 place-items-center rounded-full text-white shadow-lg {gradeAnimation ===
+					'correct'
+						? 'bg-emerald-500'
+						: 'bg-rose-500'}"
+				>
+					{#if gradeAnimation === 'correct'}
+						<CheckIcon class="size-10" />
+					{:else}
+						<XIcon class="size-10" />
+					{/if}
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	{#if data}
 		<figcaption class="flex flex-col gap-3">
-			<div class="flex flex-col gap-1.5">
-				<div class="flex items-center justify-between gap-3 text-sm tabular-nums">
-					<span class={complete ? 'font-medium text-primary' : 'text-muted-foreground'}>
-						{drawnCount} de {totalStrokes} trazos{evaluationMode === 'deferred'
-							? ' dibujados'
-							: ''}
-					</span>
-					<span class="text-muted-foreground">{attempts} intentos</span>
+			{#if showProgress}
+				<div class="flex flex-col gap-1.5">
+					<div class="flex items-center justify-between gap-3 text-sm tabular-nums">
+						<span class={complete ? 'font-medium text-primary' : 'text-muted-foreground'}>
+							{drawnCount} de {totalStrokes} trazos{evaluationMode === 'deferred'
+								? ' dibujados'
+								: ''}
+						</span>
+						<span class="text-muted-foreground">{attempts} intentos</span>
+					</div>
+					<Progress
+						value={drawnCount}
+						max={totalStrokes}
+						aria-label={evaluationMode === 'deferred'
+							? 'Progreso de trazos dibujados'
+							: 'Progreso de trazos correctos'}
+					/>
 				</div>
-				<Progress
-					value={drawnCount}
-					max={totalStrokes}
-					aria-label={evaluationMode === 'deferred'
-						? 'Progreso de trazos dibujados'
-						: 'Progreso de trazos correctos'}
-				/>
-			</div>
 
-			<p
-				id="kana-writing-feedback"
-				class={deferredGrade === false
-					? 'min-h-5 text-sm font-medium text-destructive'
-					: complete
-						? 'min-h-5 text-sm font-medium text-primary'
-						: 'min-h-5 text-sm text-muted-foreground'}
-				aria-live="polite"
-			>
-				{feedback}
-			</p>
+				<p
+					id="kana-writing-feedback"
+					class={deferredGrade === false
+						? 'min-h-5 text-sm font-medium text-destructive'
+						: complete
+							? 'min-h-5 text-sm font-medium text-primary'
+							: 'min-h-5 text-sm text-muted-foreground'}
+					aria-live="polite"
+				>
+					{feedback}
+				</p>
+			{/if}
 
 			<div class="flex flex-wrap gap-2">
-				{#if evaluationMode === 'deferred'}
+				{#if showCheckButton && evaluationMode === 'deferred'}
 					{#if deferredGrade === false}
 						<Button size="sm" onclick={retryDeferred}>Reintentar</Button>
 					{:else}
@@ -843,3 +890,30 @@
 		</figcaption>
 	{/if}
 </figure>
+
+<style>
+	.grade-pop {
+		animation: grade-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	@keyframes grade-pop {
+		0% {
+			transform: scale(0.4);
+			opacity: 0;
+		}
+		60% {
+			transform: scale(1.08);
+			opacity: 1;
+		}
+		100% {
+			transform: scale(1);
+			opacity: 1;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.grade-pop {
+			animation: none;
+		}
+	}
+</style>

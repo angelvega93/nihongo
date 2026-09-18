@@ -20,6 +20,7 @@
 	import { KanaMastery, masteryLabel, progressKey } from '$lib/kana/progress.js';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import Gamepad2Icon from '@lucide/svelte/icons/gamepad-2';
 	import ShuffleIcon from '@lucide/svelte/icons/shuffle';
 	import type { PageProps } from './$types';
@@ -156,6 +157,10 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<Badge variant="outline">{masteredCount} dominados</Badge>
+				<Button href={resolve('/kana/lecciones')} variant="outline">
+					<BookOpenIcon data-icon="inline-start" />
+					Lecciones
+				</Button>
 				<Button href={resolve('/kana/practica')}>
 					<Gamepad2Icon data-icon="inline-start" />
 					Ir a práctica
@@ -244,6 +249,5 @@
 				<KanaProgressPanel {progress} />
 			</div>
 		</div>
-
 	</main>
 </div>

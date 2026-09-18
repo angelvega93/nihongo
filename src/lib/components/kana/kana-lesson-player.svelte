@@ -44,6 +44,12 @@
 		return kana ? kanaCharacter(kana, lesson.script) : '';
 	});
 
+	/** Romaji reading of the current kana, e.g. `a` for あ. */
+	const stepRomaji = $derived.by(() => {
+		if (!step || (step.kind !== 'teach' && step.kind !== 'draw')) return '';
+		return kanaById(step.kanaId)?.romaji ?? '';
+	});
+
 	function clearGradeTimer() {
 		if (gradeTimer !== undefined) {
 			clearTimeout(gradeTimer);
@@ -138,8 +144,14 @@
 						Observa cómo se escribe <span class="font-serif text-lg">{stepCharacter}</span> antes de dibujarlo.
 					</Card.Description>
 				</Card.Header>
-				<Card.Content class="mx-auto w-full max-w-72">
-					<KanaStrokeViewer character={stepCharacter} />
+				<Card.Content class="flex flex-col items-center gap-6">
+					<div class="flex flex-col items-center gap-1 text-center">
+						<span class="text-sm text-muted-foreground">se lee</span>
+						<span class="text-6xl font-semibold tracking-wide uppercase">{stepRomaji}</span>
+					</div>
+					<div class="mx-auto w-full max-w-72">
+						<KanaStrokeViewer character={stepCharacter} />
+					</div>
 				</Card.Content>
 			</Card.Root>
 		{:else if step?.kind === 'draw'}

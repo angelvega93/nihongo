@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
 	import CheckIcon from '@lucide/svelte/icons/check';
@@ -20,6 +19,10 @@
 	let index = $state(0);
 	let selectedOptionId = $state<number | null>(null);
 	let graded = $state(false);
+	let autoTimer: ReturnType<typeof setTimeout> | undefined;
+
+	/** Short pause so the user can see whether the answer was right. */
+	const AUTO_ADVANCE_MS = 1000;
 
 	const question = $derived(questions[index]);
 	const isLast = $derived(index >= questions.length - 1);
@@ -30,6 +33,20 @@
 	const percent = $derived(
 		questions.length === 0 ? 0 : Math.round((answered / questions.length) * 100)
 	);
+
+	function clearAutoTimer() {
+		if (autoTimer !== undefined) {
+			clearTimeout(autoTimer);
+			autoTimer = undefined;
+		}
+	}
+
+	// Drop any pending advance when the quiz is unmounted (e.g. step change).
+	$effect(() => {
+		return () => {
+			if (autoTimer !== undefined) clearTimeout(autoTimer);
+		};
+	});
 
 	function optionClass(optionId: number) {
 		if (!graded) return 'border-border bg-background hover:bg-muted/50';
@@ -43,9 +60,13 @@
 		selectedOptionId = optionId;
 		graded = true;
 		onanswer?.(question.kanaId, optionId === question.correctOptionId);
+
+		clearAutoTimer();
+		autoTimer = setTimeout(next, AUTO_ADVANCE_MS);
 	}
 
 	function next() {
+		clearAutoTimer();
 		if (!isLast) {
 			index += 1;
 			selectedOptionId = null;
@@ -107,11 +128,6 @@
 						Elige una opción.
 					{/if}
 				</p>
-				{#if graded}
-					<Button type="button" onclick={next}>
-						{isLast ? 'Continuar' : 'Siguiente'}
-					</Button>
-				{/if}
 			</div>
 		{/if}
 	</Card.Content>

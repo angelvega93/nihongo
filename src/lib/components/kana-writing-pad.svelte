@@ -616,11 +616,14 @@
 	}
 
 	function checkDeferred(): boolean | null {
-		if (evaluationMode !== 'deferred' || !data || userStrokes.length !== data.strokes.length)
-			return null;
+		if (evaluationMode !== 'deferred' || !data) return null;
 
 		attempts += 1;
-		const result = scoreCharacter(userStrokes, data.strokes);
+		// A partial drawing never blocks progress: it is graded as incorrect.
+		const drawingComplete = userStrokes.length === data.strokes.length && userStrokes.length > 0;
+		const result = drawingComplete
+			? scoreCharacter(userStrokes, data.strokes)
+			: { accepted: false as const };
 		deferredGrade = result.accepted;
 		userStrokes = userStrokes.map((stroke) => ({ ...stroke, accepted: result.accepted }));
 		feedback = result.accepted
@@ -632,16 +635,12 @@
 	}
 
 	/**
-	 * Grade the deferred drawing on demand. Returns `null` when the drawing is
-	 * not ready (wrong mode, still loading, or not every stroke drawn yet).
+	 * Grade the deferred drawing on demand. Returns `null` only when grading is
+	 * not applicable (wrong mode or still loading). A partial drawing returns
+	 * `false` so the caller can continue anyway.
 	 */
 	export function check(): boolean | null {
 		return checkDeferred();
-	}
-
-	/** Clear every stroke and start the practice over. */
-	export function reset() {
-		resetPractice();
 	}
 
 	function cancelPointer(event: PointerEvent) {

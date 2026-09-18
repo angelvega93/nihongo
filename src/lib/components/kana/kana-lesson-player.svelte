@@ -30,7 +30,7 @@
 	let drawGrade = $state<'correct' | 'incorrect' | null>(null);
 	let drawHint = $state('');
 	let roundKey = $state(0);
-	let pad = $state<{ check: () => boolean | null; reset: () => void } | null>(null);
+	let pad = $state<{ check: () => boolean | null } | null>(null);
 	let gradeTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const step = $derived(lesson.steps[index]);
@@ -75,12 +75,14 @@
 		if (step?.kind !== 'draw') return;
 		const result = pad?.check() ?? null;
 
+		clearGradeTimer();
+
+		// The canvas is not ready: just move on without grading.
 		if (result === null) {
-			drawHint = 'Dibuja todos los trazos antes de continuar.';
+			advance();
 			return;
 		}
 
-		clearGradeTimer();
 		drawGrade = result ? 'correct' : 'incorrect';
 		onattempt?.(step.kanaId, result);
 
@@ -91,13 +93,9 @@
 			return;
 		}
 
-		// Show the red animation briefly, then clear the canvas so the user can retry.
-		drawHint = 'Revisa el orden y la forma del trazo. Vuelve a intentarlo.';
-		gradeTimer = setTimeout(() => {
-			drawGrade = null;
-			pad?.reset();
-			gradeTimer = undefined;
-		}, 1200);
+		// Show the red animation, then let the user continue anyway.
+		drawHint = 'Puedes continuar igualmente.';
+		gradeTimer = setTimeout(advance, 1100);
 	}
 </script>
 

@@ -7,87 +7,103 @@
 	import { Progress } from '$lib/components/ui/progress/index.js';
 	import {
 		ALL_KANA,
-		allKanaForScript,
 		kanaCharacter,
 		pickNext,
 		shuffle,
 		uniqueOptions,
 		wordForScript,
 		wordKanaIds,
-		type Kana,
 		type KanaScript,
 		type VocabularyWord
 	} from '$lib/kana/data.js';
+	import type { PracticeKana, WordsByScript } from '$lib/kana/practice.js';
+	import { modeInfo, type PracticeMode } from '$lib/kana/practice-modes.js';
 	import { cn } from '$lib/utils.js';
 	import RefreshCcwIcon from '@lucide/svelte/icons/refresh-ccw';
 	import VolumeXIcon from '@lucide/svelte/icons/volume-x';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { Attachment } from 'svelte/attachments';
-	import type { PracticeMode } from './kana-practice-modes.svelte';
+
+	/** A single kana attempt, tagged with the script it was practised in. */
+	export type PracticeAttempt = { script: KanaScript; kanaId: string };
 
 	export type PracticeOutcome = {
 		/** Kana involved in the exercise, used to update per-kana progress. */
-		kanaIds: string[];
+		attempts: PracticeAttempt[];
 		correct: boolean;
 	};
 
 	type Feedback = { kind: 'correct' | 'wrong' | 'info'; text: string };
-	type PairTile = { id: string; label: string };
+	type PairTile = { key: string; label: string };
 	type FormationTile = { id: string; character: string };
 
 	type Props = {
 		mode: PracticeMode;
-		script: KanaScript;
-		/** Kana available for this round (already filtered by availability + mastery). */
-		pool: Kana[];
-		/** Vocabulary words whose kana are all enabled, for the word modes. */
-		words: VocabularyWord[];
+		/** Enabled kana of both scripts, mixed. */
+		pool: PracticeKana[];
+		/** Available vocabulary words per script, for the word modes. */
+		wordsByScript: WordsByScript;
 		onoutcome: (outcome: PracticeOutcome) => void;
 	};
 
-	let { mode, script, pool, words, onoutcome }: Props = $props();
+	let { mode, pool, wordsByScript, onoutcome }: Props = $props();
 
 	const QUIZ_SECONDS = 10;
-	const scriptKana = $derived(allKanaForScript(script));
-	const activePool = $derived(pool.length > 0 ? pool : scriptKana);
+	const info = $derived(modeInfo(mode));
+
+	/** Placeholder used before `onMount(newRound)` picks a real target. */
+	const fallback: PracticeKana = {
+		kana: ALL_KANA[0],
+		script: 'hiragana',
+		key: `hiragana:${ALL_KANA[0].id}`
+	};
+
+	const activePool = $derived(pool.length > 0 ? pool : [fallback]);
+
 	/**
 	 * Drawing uses the stroke-order data, which only exists for single
 	 * characters, so yōon (きゃ…) are excluded from the draw mode.
 	 */
 	const drawPool = $derived.by(() => {
 		const single = activePool.filter(
-			(item) => Array.from(kanaCharacter(item, script)).length === 1
+			(item) => Array.from(kanaCharacter(item.kana, item.script)).length === 1
 		);
 		return single.length > 0 ? single : activePool;
 	});
-	/** Never ask for more pairs than there are kana to match. */
-	const pairCount = $derived(Math.min(6, activePool.length));
 
 	/**
-	 * Placeholder kana for the first render. The component is remounted by the
-	 * parent whenever the script changes, and `onMount(newRound)` immediately
-	 * replaces these with a real target from the active pool.
+	 * Pair tiles are matched by romaji, so two kana sharing a reading (e.g. the
+	 * hiragana and katakana variants) would produce duplicate tiles. Keep one
+	 * representative per romaji.
 	 */
-	const firstKana = (): Kana => ALL_KANA[0];
+	const pairPool = $derived.by(() =>
+		activePool.filter(
+			(item, index) =>
+				activePool.findIndex((entry) => entry.kana.romaji === item.kana.romaji) === index
+		)
+	);
+	/** Never ask for more pairs than there are distinct readings. */
+	const pairCount = $derived(Math.min(6, pairPool.length));
 
 	let feedback = $state<Feedback | null>(null);
 
-	let quizTarget = $state<Kana>(firstKana());
-	let quizOptions = $state<Kana[]>(ALL_KANA.slice(0, 4));
+	let quizTarget = $state<PracticeKana>(fallback);
+	let quizOptions = $state<PracticeKana[]>([]);
 	let quizPrompt = $state<'kana' | 'romaji'>('kana');
 	let quizLocked = $state(false);
 	let quizSerial = $state(0);
 	let remaining = $state(QUIZ_SECONDS);
 
-	let listenTarget = $state<Kana>(firstKana());
-	let listenOptions = $state<Kana[]>(ALL_KANA.slice(0, 4));
+	let listenTarget = $state<PracticeKana>(fallback);
+	let listenOptions = $state<PracticeKana[]>([]);
 	let listenLocked = $state(false);
 
-	let drawTarget = $state<Kana>(firstKana());
+	let drawTarget = $state<PracticeKana>(fallback);
 	let drawComplete = $state(false);
 
 	let wordTarget = $state<VocabularyWord | null>(null);
+	let wordScript = $state<KanaScript>('hiragana');
 	let wordOptions = $state<VocabularyWord[]>([]);
 	let wordLocked = $state(false);
 
@@ -97,11 +113,12 @@
 	let selectedPairRomaji = $state<string | null>(null);
 	let matchedPairs = new SvelteSet<string>();
 
-	let writingTarget = $state<Kana>(firstKana());
+	let writingTarget = $state<PracticeKana>(fallback);
 	let writingAnswer = $state('');
 	let writingLocked = $state(false);
 
 	let formationTarget = $state<VocabularyWord | null>(null);
+	let formationScript = $state<KanaScript>('hiragana');
 	let formationTiles = $state<FormationTile[]>([]);
 	let selectedFormationIds = $state<string[]>([]);
 	let formationLocked = $state(false);
@@ -139,61 +156,92 @@
 		};
 	}
 
-	function recordOutcome(kanaIds: string[], isCorrect: boolean, text: string) {
+	function recordOutcome(attempts: PracticeAttempt[], isCorrect: boolean, text: string) {
 		feedback = { kind: isCorrect ? 'correct' : 'wrong', text };
-		onoutcome({ kanaIds, correct: isCorrect });
+		onoutcome({ attempts, correct: isCorrect });
+	}
+
+	/** Attempts for a single kana item. */
+	function attemptFor(item: PracticeKana): PracticeAttempt[] {
+		return [{ script: item.script, kanaId: item.kana.id }];
+	}
+
+	/** Attempts for a vocabulary word, in the script it was practised in. */
+	function wordAttempts(word: VocabularyWord, script: KanaScript): PracticeAttempt[] {
+		return wordKanaIds(word).map((kanaId) => ({ script, kanaId }));
+	}
+
+	/** Kana of the same script, so a romaji→kana question has one valid answer. */
+	function sameScriptPool(item: PracticeKana): PracticeKana[] {
+		const same = activePool.filter((entry) => entry.script === item.script);
+		return same.length > 0 ? same : activePool;
 	}
 
 	function newQuiz() {
-		quizTarget = pickNext(activePool, quizTarget, (kana) => kana.id);
+		quizTarget = pickNext(activePool, quizTarget, (item) => item.key);
 		quizPrompt = Math.random() < 0.5 ? 'kana' : 'romaji';
-		quizOptions = uniqueOptions(quizTarget, activePool, (kana) =>
-			quizPrompt === 'kana' ? kana.romaji : kanaCharacter(kana, script)
-		);
+		quizOptions =
+			quizPrompt === 'kana'
+				? // Prompt shows the kana, answers are romaji: dedupe by reading.
+					uniqueOptions(quizTarget, activePool, (item) => item.kana.romaji)
+				: // Prompt shows the romaji, answers are kana: keep one script only.
+					uniqueOptions(quizTarget, sameScriptPool(quizTarget), (item) =>
+						kanaCharacter(item.kana, item.script)
+					);
 		quizLocked = false;
 		feedback = null;
 		quizSerial += 1;
 	}
 
-	function answerQuiz(option: Kana) {
+	function isQuizCorrect(option: PracticeKana): boolean {
+		return quizPrompt === 'kana'
+			? option.kana.romaji === quizTarget.kana.romaji
+			: option.key === quizTarget.key;
+	}
+
+	function answerQuiz(option: PracticeKana) {
 		if (quizLocked) return;
 		quizLocked = true;
+		const correct = isQuizCorrect(option);
 		recordOutcome(
-			[quizTarget.id],
-			option.id === quizTarget.id,
-			option.id === quizTarget.id
+			attemptFor(quizTarget),
+			correct,
+			correct
 				? 'Respuesta correcta.'
-				: `La respuesta era ${quizPrompt === 'kana' ? quizTarget.romaji : kanaCharacter(quizTarget, script)}.`
+				: `La respuesta era ${quizPrompt === 'kana' ? quizTarget.kana.romaji : kanaCharacter(quizTarget.kana, quizTarget.script)}.`
 		);
 	}
 
 	function finishQuizTimeout() {
 		if (quizLocked || mode !== 'quiz') return;
 		quizLocked = true;
-		recordOutcome([quizTarget.id], false, 'Se acabó el tiempo. Avanza cuando estés listo.');
+		recordOutcome(attemptFor(quizTarget), false, 'Se acabó el tiempo. Avanza cuando estés listo.');
 	}
 
 	function newListen() {
-		listenTarget = pickNext(activePool, listenTarget, (kana) => kana.id);
-		listenOptions = uniqueOptions(listenTarget, activePool, (kana) => kanaCharacter(kana, script));
+		listenTarget = pickNext(activePool, listenTarget, (item) => item.key);
+		listenOptions = uniqueOptions(listenTarget, sameScriptPool(listenTarget), (item) =>
+			kanaCharacter(item.kana, item.script)
+		);
 		listenLocked = false;
 		feedback = null;
 	}
 
-	function answerListen(option: Kana) {
+	function answerListen(option: PracticeKana) {
 		if (listenLocked) return;
 		listenLocked = true;
+		const correct = option.key === listenTarget.key;
 		recordOutcome(
-			[listenTarget.id],
-			option.id === listenTarget.id,
-			option.id === listenTarget.id
+			attemptFor(listenTarget),
+			correct,
+			correct
 				? 'Identificación correcta.'
-				: `La opción correcta era ${kanaCharacter(listenTarget, script)}.`
+				: `La opción correcta era ${kanaCharacter(listenTarget.kana, listenTarget.script)}.`
 		);
 	}
 
 	function newDraw() {
-		drawTarget = pickNext(drawPool, drawTarget, (kana) => kana.id);
+		drawTarget = pickNext(drawPool, drawTarget, (item) => item.key);
 		drawComplete = false;
 		feedback = null;
 	}
@@ -201,16 +249,28 @@
 	function finishDrawing() {
 		if (drawComplete) return;
 		drawComplete = true;
-		recordOutcome([drawTarget.id], true, 'Kana completado con trazos válidos.');
+		recordOutcome(attemptFor(drawTarget), true, 'Kana completado con trazos válidos.');
 	}
 
 	function failDrawing() {
 		feedback = null;
-		onoutcome({ kanaIds: [drawTarget.id], correct: false });
+		onoutcome({ attempts: attemptFor(drawTarget), correct: false });
+	}
+
+	/** Pick a script that actually has words available. */
+	function pickWordScript(): KanaScript {
+		const scripts = (['hiragana', 'katakana'] as const).filter(
+			(script) => wordsByScript[script].length > 0
+		);
+		if (scripts.length === 0) return 'hiragana';
+		return scripts[Math.floor(Math.random() * scripts.length)];
 	}
 
 	function newWordChoice() {
+		const script = pickWordScript();
+		const words = wordsByScript[script];
 		if (words.length === 0) return;
+		wordScript = script;
 		wordTarget = pickNext(words, wordTarget ?? undefined, (word) => word.id);
 		wordOptions = uniqueOptions(wordTarget, words, (word) => wordForScript(word, script));
 		wordLocked = false;
@@ -220,35 +280,37 @@
 	function answerWord(option: VocabularyWord) {
 		if (wordLocked || !wordTarget) return;
 		wordLocked = true;
+		const correct = option.id === wordTarget.id;
 		recordOutcome(
-			wordKanaIds(wordTarget),
-			option.id === wordTarget.id,
-			option.id === wordTarget.id
-				? 'Palabra correcta.'
-				: `La respuesta era ${wordForScript(wordTarget, script)}.`
+			wordAttempts(wordTarget, wordScript),
+			correct,
+			correct ? 'Palabra correcta.' : `La respuesta era ${wordForScript(wordTarget, wordScript)}.`
 		);
 	}
 
 	function newPairs() {
-		const round = shuffle(activePool).slice(0, pairCount);
-		pairKana = shuffle(round.map((kana) => ({ id: kana.id, label: kanaCharacter(kana, script) })));
-		pairRomaji = shuffle(round.map((kana) => ({ id: kana.id, label: kana.romaji })));
+		const round = shuffle(pairPool).slice(0, pairCount);
+		pairKana = shuffle(
+			round.map((item) => ({ key: item.key, label: kanaCharacter(item.kana, item.script) }))
+		);
+		pairRomaji = shuffle(round.map((item) => ({ key: item.key, label: item.kana.romaji })));
 		selectedPairKana = null;
 		selectedPairRomaji = null;
 		matchedPairs.clear();
 		feedback = { kind: 'info', text: 'Selecciona un kana y su romaji.' };
 	}
 
-	function selectPair(side: 'kana' | 'romaji', id: string) {
-		if (matchedPairs.has(id)) return;
-		if (side === 'kana') selectedPairKana = id;
-		else selectedPairRomaji = id;
+	function selectPair(side: 'kana' | 'romaji', key: string) {
+		if (matchedPairs.has(key)) return;
+		if (side === 'kana') selectedPairKana = key;
+		else selectedPairRomaji = key;
 
 		if (!selectedPairKana || !selectedPairRomaji) return;
 		const isMatch = selectedPairKana === selectedPairRomaji;
 		if (isMatch) matchedPairs.add(selectedPairKana);
+		const matched = pairPool.find((item) => item.key === selectedPairKana);
 		recordOutcome(
-			[selectedPairKana],
+			matched ? attemptFor(matched) : [],
 			isMatch,
 			isMatch
 				? matchedPairs.size === pairCount
@@ -261,7 +323,7 @@
 	}
 
 	function newWriting() {
-		writingTarget = pickNext(activePool, writingTarget, (kana) => kana.id);
+		writingTarget = pickNext(activePool, writingTarget, (item) => item.key);
 		writingAnswer = '';
 		writingLocked = false;
 		feedback = null;
@@ -272,18 +334,20 @@
 		if (writingLocked || writingAnswer.trim() === '') return;
 		writingLocked = true;
 		const answer = writingAnswer.trim().toLowerCase();
+		const correct = answer === writingTarget.kana.romaji;
 		recordOutcome(
-			[writingTarget.id],
-			answer === writingTarget.romaji,
-			answer === writingTarget.romaji
-				? 'Romanización correcta.'
-				: `La respuesta era ${writingTarget.romaji}.`
+			attemptFor(writingTarget),
+			correct,
+			correct ? 'Romanización correcta.' : `La respuesta era ${writingTarget.kana.romaji}.`
 		);
 	}
 
 	function newFormation() {
+		const script = pickWordScript();
+		const words = wordsByScript[script];
 		if (words.length === 0) return;
 		const target = pickNext(words, formationTarget ?? undefined, (word) => word.id);
+		formationScript = script;
 		formationTarget = target;
 		formationTiles = shuffle(
 			Array.from(wordForScript(target, script), (character, index) => ({
@@ -306,11 +370,12 @@
 		const answer = nextSelection
 			.map((selectedId) => formationTiles.find((tile) => tile.id === selectedId)?.character ?? '')
 			.join('');
-		const expected = wordForScript(formationTarget, script);
+		const expected = wordForScript(formationTarget, formationScript);
+		const correct = answer === expected;
 		recordOutcome(
-			wordKanaIds(formationTarget),
-			answer === expected,
-			answer === expected ? 'Palabra formada correctamente.' : `El orden correcto era ${expected}.`
+			wordAttempts(formationTarget, formationScript),
+			correct,
+			correct ? 'Palabra formada correctamente.' : `El orden correcto era ${expected}.`
 		);
 	}
 
@@ -350,35 +415,24 @@
 		}
 	}
 
-	// The parent remounts this component (via `{#key}`) whenever the mode,
-	// script or pool changes, so a single mount-time round is enough.
+	// The parent remounts this component (via `{#key}`) whenever the mode or
+	// pool changes, so a single mount-time round is enough.
 	onMount(newRound);
 </script>
 
 <Card.Root class="mx-auto w-full max-w-3xl">
 	<Card.Header class="gap-1">
 		<div class="flex items-center justify-between gap-3">
-			<Card.Title>
-				{#if mode === 'quiz'}Prueba
-				{:else if mode === 'listen'}Escucha
-				{:else if mode === 'draw'}Dibujar
-				{:else if mode === 'word-choice'}Selección de palabra
-				{:else if mode === 'pairs'}Emparejar pares
-				{:else if mode === 'writing'}Escritura
-				{:else}Formación de palabra{/if}
-			</Card.Title>
-			<Badge variant="secondary">{script === 'hiragana' ? 'Hiragana' : 'Katakana'}</Badge>
+			<Card.Title>{info.label}</Card.Title>
+			{#if mode === 'draw' || mode === 'writing'}
+				<Badge variant="secondary">
+					{drawTarget.script === 'hiragana' ? 'Hiragana' : 'Katakana'}
+				</Badge>
+			{:else}
+				<Badge variant="outline">Hiragana + Katakana</Badge>
+			{/if}
 		</div>
-		<Card.Description>
-			{#if mode === 'quiz'}Elige la equivalencia antes de que termine el tiempo.
-			{:else if mode === 'listen'}Identifica el kana correspondiente al sonido.
-			{:else if mode === 'draw'}Dibuja de memoria el kana solicitado.
-			{:else if mode === 'word-choice'}Relaciona el significado y la lectura con la palabra
-				japonesa.
-			{:else if mode === 'pairs'}Une cada kana con su romanización.
-			{:else if mode === 'writing'}Escribe la lectura en romaji.
-			{:else}Ordena los kana para formar la palabra.{/if}
-		</Card.Description>
+		<Card.Description>{info.description}</Card.Description>
 	</Card.Header>
 
 	<Card.Content
@@ -396,18 +450,20 @@
 			<div class="text-center">
 				<p class="text-sm text-muted-foreground">Busca la equivalencia</p>
 				<p class="mt-2 text-6xl font-medium">
-					{quizPrompt === 'kana' ? kanaCharacter(quizTarget, script) : quizTarget.romaji}
+					{quizPrompt === 'kana'
+						? kanaCharacter(quizTarget.kana, quizTarget.script)
+						: quizTarget.kana.romaji}
 				</p>
 			</div>
 			<div class="grid grid-cols-2 gap-3">
-				{#each quizOptions as option (option.id)}
+				{#each quizOptions as option (option.key)}
 					<Button
 						variant="outline"
 						class="h-16 text-lg"
 						disabled={quizLocked}
 						onclick={() => answerQuiz(option)}
 					>
-						{quizPrompt === 'kana' ? option.romaji : kanaCharacter(option, script)}
+						{quizPrompt === 'kana' ? option.kana.romaji : kanaCharacter(option.kana, option.script)}
 					</Button>
 				{/each}
 			</div>
@@ -417,19 +473,19 @@
 				<div>
 					<p class="font-medium">Audio no disponible todavía</p>
 					<p class="text-sm text-muted-foreground">
-						Referencia temporal en romaji: <strong>{listenTarget.romaji}</strong>
+						Referencia temporal en romaji: <strong>{listenTarget.kana.romaji}</strong>
 					</p>
 				</div>
 			</div>
 			<div class="grid grid-cols-2 gap-3">
-				{#each listenOptions as option (option.id)}
+				{#each listenOptions as option (option.key)}
 					<Button
 						variant="outline"
 						class="h-16 text-2xl"
 						disabled={listenLocked}
 						onclick={() => answerListen(option)}
 					>
-						{kanaCharacter(option, script)}
+						{kanaCharacter(option.kana, option.script)}
 					</Button>
 				{/each}
 			</div>
@@ -437,12 +493,15 @@
 			<div class="grid items-start gap-5 sm:grid-cols-[1fr_18rem]">
 				<div class="flex flex-col items-center justify-center gap-2 py-6 text-center">
 					<p class="text-sm text-muted-foreground">Dibuja el kana de</p>
-					<p class="text-4xl font-semibold">{drawTarget.romaji}</p>
+					<p class="text-4xl font-semibold">{drawTarget.kana.romaji}</p>
+					<Badge variant="outline">
+						{drawTarget.script === 'hiragana' ? 'Hiragana' : 'Katakana'}
+					</Badge>
 				</div>
 				<div class="mx-auto w-full max-w-72">
-					{#key `${script}-${drawTarget.id}`}
+					{#key drawTarget.key}
 						<KanaWritingPad
-							character={kanaCharacter(drawTarget, script)}
+							character={kanaCharacter(drawTarget.kana, drawTarget.script)}
 							showGuide={false}
 							showIndicators={false}
 							evaluationMode="deferred"
@@ -466,7 +525,7 @@
 							disabled={wordLocked}
 							onclick={() => answerWord(option)}
 						>
-							{wordForScript(option, script)}
+							{wordForScript(option, wordScript)}
 						</Button>
 					{/each}
 				</div>
@@ -482,30 +541,32 @@
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="grid gap-2" aria-label="Kana">
-					{#each pairKana as tile (tile.id)}
+					{#each pairKana as tile (tile.key)}
 						<Button
-							variant={selectedPairKana === tile.id ? 'secondary' : 'outline'}
-							class={cn('h-12 text-xl', matchedPairs.has(tile.id) && 'opacity-45')}
-							disabled={matchedPairs.has(tile.id)}
-							aria-pressed={selectedPairKana === tile.id}
-							onclick={() => selectPair('kana', tile.id)}>{tile.label}</Button
+							variant={selectedPairKana === tile.key ? 'secondary' : 'outline'}
+							class={cn('h-12 text-xl', matchedPairs.has(tile.key) && 'opacity-45')}
+							disabled={matchedPairs.has(tile.key)}
+							aria-pressed={selectedPairKana === tile.key}
+							onclick={() => selectPair('kana', tile.key)}>{tile.label}</Button
 						>
 					{/each}
 				</div>
 				<div class="grid gap-2" aria-label="Romaji">
-					{#each pairRomaji as tile (tile.id)}
+					{#each pairRomaji as tile (tile.key)}
 						<Button
-							variant={selectedPairRomaji === tile.id ? 'secondary' : 'outline'}
-							class={cn('h-12', matchedPairs.has(tile.id) && 'opacity-45')}
-							disabled={matchedPairs.has(tile.id)}
-							aria-pressed={selectedPairRomaji === tile.id}
-							onclick={() => selectPair('romaji', tile.id)}>{tile.label}</Button
+							variant={selectedPairRomaji === tile.key ? 'secondary' : 'outline'}
+							class={cn('h-12', matchedPairs.has(tile.key) && 'opacity-45')}
+							disabled={matchedPairs.has(tile.key)}
+							aria-pressed={selectedPairRomaji === tile.key}
+							onclick={() => selectPair('romaji', tile.key)}>{tile.label}</Button
 						>
 					{/each}
 				</div>
 			</div>
 		{:else if mode === 'writing'}
-			<div class="text-center text-6xl font-medium">{kanaCharacter(writingTarget, script)}</div>
+			<div class="text-center text-6xl font-medium">
+				{kanaCharacter(writingTarget.kana, writingTarget.script)}
+			</div>
 			<form class="mx-auto flex w-full max-w-md flex-col gap-3" onsubmit={submitWriting}>
 				<label for="romaji-answer" class="text-sm font-medium">Romaji</label>
 				<Input

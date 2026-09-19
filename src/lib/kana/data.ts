@@ -550,7 +550,19 @@ export const VOCABULARY: VocabularyWord[] = [
 	{ id: 'mountain', hiragana: 'やま', romaji: 'yama', meaning: 'montaña' },
 	{ id: 'sky', hiragana: 'そら', romaji: 'sora', meaning: 'cielo' },
 	{ id: 'flower', hiragana: 'はな', romaji: 'hana', meaning: 'flor' },
-	{ id: 'car', hiragana: 'くるま', romaji: 'kuruma', meaning: 'coche' }
+	{ id: 'car', hiragana: 'くるま', romaji: 'kuruma', meaning: 'coche' },
+	{ id: 'fish', hiragana: 'さかな', romaji: 'sakana', meaning: 'pez' },
+	{ id: 'bird', hiragana: 'とり', romaji: 'tori', meaning: 'pájaro' },
+	{ id: 'shoes', hiragana: 'くつ', romaji: 'kutsu', meaning: 'zapatos' },
+	{ id: 'star', hiragana: 'ほし', romaji: 'hoshi', meaning: 'estrella' },
+	{ id: 'moon', hiragana: 'つき', romaji: 'tsuki', meaning: 'luna' },
+	{ id: 'umbrella', hiragana: 'かさ', romaji: 'kasa', meaning: 'paraguas' },
+	{ id: 'house', hiragana: 'いえ', romaji: 'ie', meaning: 'casa' },
+	{ id: 'ear', hiragana: 'みみ', romaji: 'mimi', meaning: 'oreja' },
+	{ id: 'mouth', hiragana: 'くち', romaji: 'kuchi', meaning: 'boca' },
+	{ id: 'hand', hiragana: 'て', romaji: 'te', meaning: 'mano' },
+	{ id: 'eye', hiragana: 'め', romaji: 'me', meaning: 'ojo' },
+	{ id: 'road', hiragana: 'みち', romaji: 'michi', meaning: 'camino' }
 ];
 
 export function kanaCharacter(kana: Kana, script: KanaScript): string {

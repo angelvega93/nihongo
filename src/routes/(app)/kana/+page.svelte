@@ -62,18 +62,6 @@
 
 	const currentEnabled = $derived(current ? isKanaEnabled(enabled, script, current.id) : false);
 
-	const enabledCount = $derived(
-		scriptKana.filter((item) => isKanaEnabled(enabled, script, item.id)).length
-	);
-
-	const masteredCount = $derived(
-		scriptKana.filter(
-			(item) =>
-				(progress[progressKey(script, item.id)]?.mastery ?? KanaMastery.New) ===
-				KanaMastery.Mastered
-		).length
-	);
-
 	function focusKana(targetScript: KanaScript, character: string) {
 		focusedByScript[targetScript] = character;
 	}

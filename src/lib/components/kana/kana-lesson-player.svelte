@@ -177,7 +177,7 @@
 			</Card.Root>
 		{:else if step?.kind === 'quiz'}
 			<KanaQuiz
-				questions={step.questions}
+				question={step.question}
 				onanswer={(kanaId, correct) => onattempt?.(kanaId, correct)}
 				onfinished={advance}
 			/>

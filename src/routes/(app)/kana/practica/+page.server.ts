@@ -14,8 +14,11 @@ const attemptsSchema = z.array(attemptSchema).min(1).max(50);
 
 export const load: PageServerLoad = async (event) => {
 	const userId = event.locals.user!.id;
-	const progress = await kanaService.getProgress(userId);
-	return { progress };
+	const [progress, enabled] = await Promise.all([
+		kanaService.getProgress(userId),
+		kanaService.getEnabledKana(userId)
+	]);
+	return { progress, enabled };
 };
 
 export const actions: Actions = {

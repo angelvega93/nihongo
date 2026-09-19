@@ -3,6 +3,9 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
 	const userId = event.locals.user!.id;
-	const progress = await kanaService.getProgress(userId);
-	return { progress };
+	const [progress, enabled] = await Promise.all([
+		kanaService.getProgress(userId),
+		kanaService.getEnabledKana(userId)
+	]);
+	return { progress, enabled };
 };

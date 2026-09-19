@@ -1,4 +1,4 @@
-import { BASIC_KANA, type KanaScript } from './data.js';
+import { type KanaScript, uniqueKana } from './data.js';
 
 /**
  * Mastery level of a single kana for a given user.
@@ -82,11 +82,12 @@ export type KanaProgressSummary = {
 };
 
 export function summarizeProgress(progress: KanaProgressMap): KanaProgressSummary {
-	const total = BASIC_KANA.length;
+	const catalog = uniqueKana();
+	const total = catalog.length;
 	let mastered = 0;
 	let learning = 0;
 
-	for (const kana of BASIC_KANA) {
+	for (const kana of catalog) {
 		const entry =
 			progress[progressKey('hiragana', kana.id)] ?? progress[progressKey('katakana', kana.id)];
 		if (!entry) continue;

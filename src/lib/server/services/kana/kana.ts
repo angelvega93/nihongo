@@ -1,9 +1,11 @@
 import { db } from '$lib/server/db';
-import { kanaLessonProgress, kanaProgress } from '$lib/server/db/schema';
+import { kanaEnabled, kanaLessonProgress, kanaProgress } from '$lib/server/db/schema';
 import { applyAttempt, progressKey, KanaMastery, type KanaProgressMap } from '$lib/kana/progress';
 import { isKanaScript, kanaById, type KanaScript } from '$lib/kana/data';
-import { and, eq } from 'drizzle-orm';
+import { kanaLessonById, lessonKana } from '$lib/kana/lessons';
+import { and, eq, inArray } from 'drizzle-orm';
 import { ProgressStatus } from '$lib/types/course';
+import type { KanaEnabledMap } from '$lib/kana/availability';
 
 /** A single attempt to persist. */
 export type KanaAttempt = {
@@ -131,6 +133,18 @@ export class KanaService {
 	/** Mark a guided kana lesson as completed, upserting the row. */
 	async completeLesson(userId: string, lessonSlug: string): Promise<void> {
 		const now = new Date();
+
+		// Enabling is only automatic the first time a lesson is finished, so
+		// re-playing it never overwrites the user's manual selection.
+		const previous = await db
+			.select({ status: kanaLessonProgress.status })
+			.from(kanaLessonProgress)
+			.where(
+				and(eq(kanaLessonProgress.userId, userId), eq(kanaLessonProgress.lessonSlug, lessonSlug))
+			)
+			.limit(1);
+		const wasCompleted = previous[0]?.status === ProgressStatus.Completed;
+
 		await db
 			.insert(kanaLessonProgress)
 			.values({
@@ -143,6 +157,25 @@ export class KanaService {
 				target: [kanaLessonProgress.userId, kanaLessonProgress.lessonSlug],
 				set: { status: ProgressStatus.Completed, completedAt: now, updatedAt: now }
 			});
+
+		if (wasCompleted) return;
+
+		const lesson = kanaLessonById(lessonSlug);
+		if (!lesson?.script) return;
+
+		const kana = lessonKana(lesson);
+		if (kana.length === 0) return;
+
+		await db
+			.insert(kanaEnabled)
+			.values(
+				kana.map((entry) => ({
+					userId,
+					script: lesson.script as KanaScript,
+					kanaId: entry.id
+				}))
+			)
+			.onConflictDoNothing();
 	}
 
 	/** Clear completion for one guided lesson, or for all of them. */
@@ -151,6 +184,70 @@ export class KanaService {
 			? and(eq(kanaLessonProgress.userId, userId), eq(kanaLessonProgress.lessonSlug, lessonSlug))
 			: eq(kanaLessonProgress.userId, userId);
 		await db.delete(kanaLessonProgress).where(where);
+	}
+
+	/** Enabled kana of a user, keyed by `script:kanaId`. */
+	async getEnabledKana(userId: string): Promise<KanaEnabledMap> {
+		const rows = await db
+			.select({
+				script: kanaEnabled.script,
+				kanaId: kanaEnabled.kanaId
+			})
+			.from(kanaEnabled)
+			.where(eq(kanaEnabled.userId, userId));
+
+		const map: KanaEnabledMap = {};
+		for (const row of rows) {
+			map[progressKey(row.script, row.kanaId)] = true;
+		}
+		return map;
+	}
+
+	/** Enable or disable a single kana for practice. */
+	async setKanaEnabled(
+		userId: string,
+		script: KanaScript,
+		kanaId: string,
+		enabled: boolean
+	): Promise<void> {
+		await this.setManyKanaEnabled(userId, script, [kanaId], enabled);
+	}
+
+	/** Enable or disable several kana of a script at once. */
+	async setManyKanaEnabled(
+		userId: string,
+		script: KanaScript,
+		kanaIds: string[],
+		enabled: boolean
+	): Promise<void> {
+		const valid = kanaIds.filter((kanaId) => kanaById(kanaId) !== undefined);
+		if (valid.length === 0) return;
+
+		if (enabled) {
+			await db
+				.insert(kanaEnabled)
+				.values(valid.map((kanaId) => ({ userId, script, kanaId })))
+				.onConflictDoNothing();
+			return;
+		}
+
+		await db
+			.delete(kanaEnabled)
+			.where(
+				and(
+					eq(kanaEnabled.userId, userId),
+					eq(kanaEnabled.script, script),
+					inArray(kanaEnabled.kanaId, valid)
+				)
+			);
+	}
+
+	/** Disable every kana of a script, or of every script when omitted. */
+	async resetEnabledKana(userId: string, script?: KanaScript): Promise<void> {
+		const where = script
+			? and(eq(kanaEnabled.userId, userId), eq(kanaEnabled.script, script))
+			: eq(kanaEnabled.userId, userId);
+		await db.delete(kanaEnabled).where(where);
 	}
 }
 

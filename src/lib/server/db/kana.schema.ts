@@ -55,6 +55,37 @@ export const kanaProgressRelations = relations(kanaProgress, ({ one }) => ({
 }));
 
 /**
+ * Per-user set of kana the user has enabled for free practice. The kana
+ * catalog itself is static (see `$lib/kana/data.ts`), so only the composite
+ * key is stored; a row means "enabled", its absence means "disabled".
+ *
+ * Kana are enabled automatically when their lesson is completed for the first
+ * time, and can also be toggled manually from the selection dialog.
+ */
+export const kanaEnabled = pgTable(
+	'kana_enabled',
+	{
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		script: text('script').$type<KanaScript>().notNull(),
+		kanaId: text('kana_id').notNull(),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(table) => [
+		primaryKey({ columns: [table.userId, table.script, table.kanaId] }),
+		index('kana_enabled_user_id_idx').on(table.userId)
+	]
+);
+
+export const kanaEnabledRelations = relations(kanaEnabled, ({ one }) => ({
+	user: one(user, {
+		fields: [kanaEnabled.userId],
+		references: [user.id]
+	})
+}));
+
+/**
  * Per-user completion of a guided kana lesson. The lesson catalog itself is
  * static (see `$lib/kana/lessons.ts`), so only the lesson id and status are
  * stored; `lessonSlug` is the stable id of the lesson.

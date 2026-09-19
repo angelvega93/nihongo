@@ -7,24 +7,35 @@
 		type PracticeMode
 	} from '$lib/components/kana/kana-practice-modes.svelte';
 	import KanaProgressPanel from '$lib/components/kana/kana-progress-panel.svelte';
+	import KanaSelectionDialog from '$lib/components/kana/kana-selection-dialog.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Card from '$lib/components/ui/card/index.js';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-	import { BASIC_KANA, type KanaScript } from '$lib/kana/data.js';
+	import { getKanaAvailability } from '$lib/kana/availability.remote.js';
+	import { enabledKanaForScript, filterVocabularyByEnabled } from '$lib/kana/availability.js';
+	import { type KanaScript } from '$lib/kana/data.js';
 	import {
 		computeMastery,
 		KanaMastery,
 		progressKey,
 		type KanaProgressMap
 	} from '$lib/kana/progress.js';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import RefreshCcwIcon from '@lucide/svelte/icons/refresh-ccw';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
+	import Settings2Icon from '@lucide/svelte/icons/settings-2';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
+	/** Shared with the selection dialog: changes are reflected immediately. */
+	const availability = getKanaAvailability();
+	const enabled = $derived(availability.current?.enabled ?? data.enabled);
+
+	let selectionOpen = $state(false);
 	let mode = $state<PracticeMode>('quiz');
 	let script = $state<KanaScript>('hiragana');
 	let correct = $state(0);
@@ -40,15 +51,23 @@
 
 	const accuracy = $derived(attempted === 0 ? 0 : Math.round((correct / attempted) * 100));
 
+	/** Kana of the active script the user has enabled for practice. */
+	const availableKana = $derived(enabledKanaForScript(enabled, script));
+
+	const hasAvailableKana = $derived(availableKana.length > 0);
+
 	const pool = $derived.by(() => {
-		if (!onlyUnmastered) return BASIC_KANA;
-		const filtered = BASIC_KANA.filter(
+		if (!onlyUnmastered) return availableKana;
+		const filtered = availableKana.filter(
 			(kana) =>
 				(progress[progressKey(script, kana.id)]?.mastery ?? KanaMastery.New) !==
 				KanaMastery.Mastered
 		);
-		return filtered.length > 0 ? filtered : BASIC_KANA;
+		return filtered.length > 0 ? filtered : availableKana;
 	});
+
+	/** Word modes only use vocabulary whose kana are all enabled. */
+	const words = $derived(filterVocabularyByEnabled(enabled, script));
 
 	function startMode(nextMode: PracticeMode) {
 		mode = nextMode;
@@ -146,6 +165,13 @@
 					Entrena reconocimiento, escritura y vocabulario.
 				</p>
 			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<Badge variant="outline">{availableKana.length} kana activos</Badge>
+				<Button variant="outline" size="sm" onclick={() => (selectionOpen = true)}>
+					<Settings2Icon data-icon="inline-start" />
+					Gestionar kana
+				</Button>
+			</div>
 			<div class="flex flex-wrap items-center gap-2" aria-label="Marcador de sesión">
 				<Badge variant="secondary">{correct} correctas</Badge>
 				<Badge variant="outline">{attempted} intentos</Badge>
@@ -195,11 +221,35 @@
 		</div>
 
 		<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-			{#key `${mode}-${script}-${roundKey}`}
-				<KanaPracticeCard {mode} {script} {pool} onoutcome={handleOutcome} />
-			{/key}
+			{#if hasAvailableKana}
+				{#key `${mode}-${script}-${roundKey}`}
+					<KanaPracticeCard {mode} {script} {pool} {words} onoutcome={handleOutcome} />
+				{/key}
+			{:else}
+				<Card.Root class="mx-auto w-full max-w-2xl">
+					<Card.Header class="items-center text-center">
+						<Card.Title>No hay kana activos en este silabario</Card.Title>
+						<Card.Description>
+							Activa algunos kana para practicar, o completa una lección: sus kana se activan solos
+							la primera vez.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="flex flex-wrap justify-center gap-2">
+						<Button onclick={() => (selectionOpen = true)}>
+							<Settings2Icon data-icon="inline-start" />
+							Elegir kana
+						</Button>
+						<Button href={resolve('/kana/lecciones')} variant="outline">
+							<BookOpenIcon data-icon="inline-start" />
+							Ir a lecciones
+						</Button>
+					</Card.Content>
+				</Card.Root>
+			{/if}
 
 			<KanaProgressPanel {progress} {script} class="lg:sticky lg:top-6" />
 		</div>
 	</main>
 </div>
+
+<KanaSelectionDialog bind:open={selectionOpen} />

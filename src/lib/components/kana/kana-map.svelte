@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { KANA_ROWS, kanaCharacter, type KanaScript } from '$lib/kana/data.js';
+	import { kanaRowsForScript, kanaCharacter, type KanaScript } from '$lib/kana/data.js';
 	import {
 		KanaMastery,
 		masteryClasses,
@@ -27,7 +27,7 @@
 </script>
 
 <div class={cn('flex flex-col gap-3', className)}>
-	{#each KANA_ROWS as row (row.id)}
+	{#each kanaRowsForScript(script) as row (row.id)}
 		<div class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-2">
 			<span
 				class="flex h-11 items-center justify-center rounded-md border text-xs text-muted-foreground"

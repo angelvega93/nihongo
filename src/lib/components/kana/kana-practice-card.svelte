@@ -6,13 +6,14 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
 	import {
-		BASIC_KANA,
-		VOCABULARY,
+		ALL_KANA,
+		allKanaForScript,
 		kanaCharacter,
 		pickNext,
 		shuffle,
 		uniqueOptions,
 		wordForScript,
+		wordKanaIds,
 		type Kana,
 		type KanaScript,
 		type VocabularyWord
@@ -38,34 +39,56 @@
 	type Props = {
 		mode: PracticeMode;
 		script: KanaScript;
-		/** Kana available for this round (already filtered by mastery). */
+		/** Kana available for this round (already filtered by availability + mastery). */
 		pool: Kana[];
+		/** Vocabulary words whose kana are all enabled, for the word modes. */
+		words: VocabularyWord[];
 		onoutcome: (outcome: PracticeOutcome) => void;
 	};
 
-	let { mode, script, pool, onoutcome }: Props = $props();
+	let { mode, script, pool, words, onoutcome }: Props = $props();
 
 	const QUIZ_SECONDS = 10;
-	const activePool = $derived(pool.length > 0 ? pool : BASIC_KANA);
+	const scriptKana = $derived(allKanaForScript(script));
+	const activePool = $derived(pool.length > 0 ? pool : scriptKana);
+	/**
+	 * Drawing uses the stroke-order data, which only exists for single
+	 * characters, so yōon (きゃ…) are excluded from the draw mode.
+	 */
+	const drawPool = $derived.by(() => {
+		const single = activePool.filter(
+			(item) => Array.from(kanaCharacter(item, script)).length === 1
+		);
+		return single.length > 0 ? single : activePool;
+	});
+	/** Never ask for more pairs than there are kana to match. */
+	const pairCount = $derived(Math.min(6, activePool.length));
+
+	/**
+	 * Placeholder kana for the first render. The component is remounted by the
+	 * parent whenever the script changes, and `onMount(newRound)` immediately
+	 * replaces these with a real target from the active pool.
+	 */
+	const firstKana = (): Kana => ALL_KANA[0];
 
 	let feedback = $state<Feedback | null>(null);
 
-	let quizTarget = $state<Kana>(BASIC_KANA[0]);
-	let quizOptions = $state<Kana[]>(BASIC_KANA.slice(0, 4));
+	let quizTarget = $state<Kana>(firstKana());
+	let quizOptions = $state<Kana[]>(ALL_KANA.slice(0, 4));
 	let quizPrompt = $state<'kana' | 'romaji'>('kana');
 	let quizLocked = $state(false);
 	let quizSerial = $state(0);
 	let remaining = $state(QUIZ_SECONDS);
 
-	let listenTarget = $state<Kana>(BASIC_KANA[0]);
-	let listenOptions = $state<Kana[]>(BASIC_KANA.slice(0, 4));
+	let listenTarget = $state<Kana>(firstKana());
+	let listenOptions = $state<Kana[]>(ALL_KANA.slice(0, 4));
 	let listenLocked = $state(false);
 
-	let drawTarget = $state<Kana>(BASIC_KANA[0]);
+	let drawTarget = $state<Kana>(firstKana());
 	let drawComplete = $state(false);
 
-	let wordTarget = $state<VocabularyWord>(VOCABULARY[0]);
-	let wordOptions = $state<VocabularyWord[]>(VOCABULARY.slice(0, 4));
+	let wordTarget = $state<VocabularyWord | null>(null);
+	let wordOptions = $state<VocabularyWord[]>([]);
 	let wordLocked = $state(false);
 
 	let pairKana = $state<PairTile[]>([]);
@@ -74,11 +97,11 @@
 	let selectedPairRomaji = $state<string | null>(null);
 	let matchedPairs = new SvelteSet<string>();
 
-	let writingTarget = $state<Kana>(BASIC_KANA[0]);
+	let writingTarget = $state<Kana>(firstKana());
 	let writingAnswer = $state('');
 	let writingLocked = $state(false);
 
-	let formationTarget = $state<VocabularyWord>(VOCABULARY[0]);
+	let formationTarget = $state<VocabularyWord | null>(null);
 	let formationTiles = $state<FormationTile[]>([]);
 	let selectedFormationIds = $state<string[]>([]);
 	let formationLocked = $state(false);
@@ -170,7 +193,7 @@
 	}
 
 	function newDraw() {
-		drawTarget = pickNext(activePool, drawTarget, (kana) => kana.id);
+		drawTarget = pickNext(drawPool, drawTarget, (kana) => kana.id);
 		drawComplete = false;
 		feedback = null;
 	}
@@ -187,14 +210,15 @@
 	}
 
 	function newWordChoice() {
-		wordTarget = pickNext(VOCABULARY, wordTarget, (word) => word.id);
-		wordOptions = uniqueOptions(wordTarget, VOCABULARY, (word) => wordForScript(word, script));
+		if (words.length === 0) return;
+		wordTarget = pickNext(words, wordTarget ?? undefined, (word) => word.id);
+		wordOptions = uniqueOptions(wordTarget, words, (word) => wordForScript(word, script));
 		wordLocked = false;
 		feedback = null;
 	}
 
 	function answerWord(option: VocabularyWord) {
-		if (wordLocked) return;
+		if (wordLocked || !wordTarget) return;
 		wordLocked = true;
 		recordOutcome(
 			wordKanaIds(wordTarget),
@@ -206,7 +230,7 @@
 	}
 
 	function newPairs() {
-		const round = shuffle(activePool).slice(0, 6);
+		const round = shuffle(activePool).slice(0, pairCount);
 		pairKana = shuffle(round.map((kana) => ({ id: kana.id, label: kanaCharacter(kana, script) })));
 		pairRomaji = shuffle(round.map((kana) => ({ id: kana.id, label: kana.romaji })));
 		selectedPairKana = null;
@@ -227,9 +251,9 @@
 			[selectedPairKana],
 			isMatch,
 			isMatch
-				? matchedPairs.size === 6
-					? 'Ronda completada: 6 de 6 pares.'
-					: `Pareja correcta: ${matchedPairs.size} de 6.`
+				? matchedPairs.size === pairCount
+					? `Ronda completada: ${pairCount} de ${pairCount} pares.`
+					: `Pareja correcta: ${matchedPairs.size} de ${pairCount}.`
 				: 'No forman pareja. Prueba otra combinación.'
 		);
 		selectedPairKana = null;
@@ -258,10 +282,12 @@
 	}
 
 	function newFormation() {
-		formationTarget = pickNext(VOCABULARY, formationTarget, (word) => word.id);
+		if (words.length === 0) return;
+		const target = pickNext(words, formationTarget ?? undefined, (word) => word.id);
+		formationTarget = target;
 		formationTiles = shuffle(
-			Array.from(wordForScript(formationTarget, script), (character, index) => ({
-				id: `${formationTarget.id}-${index}`,
+			Array.from(wordForScript(target, script), (character, index) => ({
+				id: `${target.id}-${index}`,
 				character
 			}))
 		);
@@ -271,7 +297,7 @@
 	}
 
 	function selectFormationTile(id: string) {
-		if (formationLocked || selectedFormationIds.includes(id)) return;
+		if (formationLocked || !formationTarget || selectedFormationIds.includes(id)) return;
 		const nextSelection = [...selectedFormationIds, id];
 		selectedFormationIds = nextSelection;
 		if (nextSelection.length !== formationTiles.length) return;
@@ -297,16 +323,6 @@
 		selectedFormationIds = [];
 		formationLocked = false;
 		feedback = null;
-	}
-
-	/** Map a vocabulary word to the kana ids it is built from. */
-	function wordKanaIds(word: VocabularyWord): string[] {
-		const ids = new SvelteSet<string>();
-		for (const character of word.hiragana) {
-			const match = BASIC_KANA.find((kana) => kana.hiragana === character);
-			if (match) ids.add(match.id);
-		}
-		return [...ids];
 	}
 
 	function newRound() {
@@ -437,26 +453,32 @@
 				</div>
 			</div>
 		{:else if mode === 'word-choice'}
-			<div class="text-center">
-				<p class="text-sm text-muted-foreground">{wordTarget.meaning}</p>
-				<p class="mt-2 text-3xl font-semibold">{wordTarget.romaji}</p>
-			</div>
-			<div class="grid grid-cols-2 gap-3">
-				{#each wordOptions as option (option.id)}
-					<Button
-						variant="outline"
-						class="h-16 text-xl"
-						disabled={wordLocked}
-						onclick={() => answerWord(option)}
-					>
-						{wordForScript(option, script)}
-					</Button>
-				{/each}
-			</div>
+			{#if wordTarget}
+				<div class="text-center">
+					<p class="text-sm text-muted-foreground">{wordTarget.meaning}</p>
+					<p class="mt-2 text-3xl font-semibold">{wordTarget.romaji}</p>
+				</div>
+				<div class="grid grid-cols-2 gap-3">
+					{#each wordOptions as option (option.id)}
+						<Button
+							variant="outline"
+							class="h-16 text-xl"
+							disabled={wordLocked}
+							onclick={() => answerWord(option)}
+						>
+							{wordForScript(option, script)}
+						</Button>
+					{/each}
+				</div>
+			{:else}
+				<p class="text-center text-sm text-muted-foreground">
+					Activa más kana para desbloquear palabras con las que practicar.
+				</p>
+			{/if}
 		{:else if mode === 'pairs'}
 			<div class="flex items-center justify-between gap-3 text-sm">
 				<span class="text-muted-foreground">Pares encontrados</span>
-				<Badge variant="secondary">{matchedPairs.size} / 6</Badge>
+				<Badge variant="secondary">{matchedPairs.size} / {pairCount}</Badge>
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="grid gap-2" aria-label="Kana">
@@ -499,45 +521,51 @@
 				>
 			</form>
 		{:else}
-			<div class="text-center">
-				<p class="text-sm text-muted-foreground">{formationTarget.meaning}</p>
-				<p class="mt-1 text-xl font-medium">{formationTarget.romaji}</p>
-			</div>
-			<div
-				class="flex min-h-16 flex-wrap items-center justify-center gap-2 rounded-md border border-dashed p-3"
-				aria-label="Palabra formada"
-			>
-				{#if selectedFormationTiles.length === 0}
-					<span class="text-sm text-muted-foreground">Selecciona los kana en orden</span>
-				{:else}
-					{#each selectedFormationTiles as tile (tile.id)}
-						<Badge variant="secondary" class="px-3 py-2 text-xl">{tile.character}</Badge>
+			{#if formationTarget}
+				<div class="text-center">
+					<p class="text-sm text-muted-foreground">{formationTarget.meaning}</p>
+					<p class="mt-1 text-xl font-medium">{formationTarget.romaji}</p>
+				</div>
+				<div
+					class="flex min-h-16 flex-wrap items-center justify-center gap-2 rounded-md border border-dashed p-3"
+					aria-label="Palabra formada"
+				>
+					{#if selectedFormationTiles.length === 0}
+						<span class="text-sm text-muted-foreground">Selecciona los kana en orden</span>
+					{:else}
+						{#each selectedFormationTiles as tile (tile.id)}
+							<Badge variant="secondary" class="px-3 py-2 text-xl">{tile.character}</Badge>
+						{/each}
+					{/if}
+				</div>
+				<div class="flex flex-wrap justify-center gap-2" aria-label="Fichas de kana">
+					{#each formationTiles as tile (tile.id)}
+						<Button
+							variant="outline"
+							size="icon-lg"
+							disabled={formationLocked || selectedFormationIds.includes(tile.id)}
+							aria-label={`Añadir ${tile.character}`}
+							onclick={() => selectFormationTile(tile.id)}>{tile.character}</Button
+						>
 					{/each}
-				{/if}
-			</div>
-			<div class="flex flex-wrap justify-center gap-2" aria-label="Fichas de kana">
-				{#each formationTiles as tile (tile.id)}
+				</div>
+				<div class="flex justify-center gap-2">
 					<Button
 						variant="outline"
-						size="icon-lg"
-						disabled={formationLocked || selectedFormationIds.includes(tile.id)}
-						aria-label={`Añadir ${tile.character}`}
-						onclick={() => selectFormationTile(tile.id)}>{tile.character}</Button
+						disabled={formationLocked || selectedFormationIds.length === 0}
+						onclick={removeLastFormationTile}>Quitar última</Button
 					>
-				{/each}
-			</div>
-			<div class="flex justify-center gap-2">
-				<Button
-					variant="outline"
-					disabled={formationLocked || selectedFormationIds.length === 0}
-					onclick={removeLastFormationTile}>Quitar última</Button
-				>
-				<Button
-					variant="ghost"
-					disabled={selectedFormationIds.length === 0}
-					onclick={resetFormationSelection}>Vaciar</Button
-				>
-			</div>
+					<Button
+						variant="ghost"
+						disabled={selectedFormationIds.length === 0}
+						onclick={resetFormationSelection}>Vaciar</Button
+					>
+				</div>
+			{:else}
+				<p class="text-center text-sm text-muted-foreground">
+					Activa más kana para desbloquear palabras con las que practicar.
+				</p>
+			{/if}
 		{/if}
 	</Card.Content>
 

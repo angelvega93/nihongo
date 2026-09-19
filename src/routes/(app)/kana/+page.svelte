@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import KanaProgressPanel from '$lib/components/kana/kana-progress-panel.svelte';
+	import KanaSelectionDialog from '$lib/components/kana/kana-selection-dialog.svelte';
 	import KanaStrokeViewer from '$lib/components/kana-stroke-viewer.svelte';
 	import KanaWritingPad from '$lib/components/kana-writing-pad.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -10,23 +11,33 @@
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
+	import { getKanaAvailability } from '$lib/kana/availability.remote.js';
+	import { isKanaEnabled } from '$lib/kana/availability.js';
 	import {
-		KANA_ROWS,
+		KANA_CATEGORIES,
 		KANA_SCRIPTS,
 		allKanaForScript,
 		kanaCharacter,
+		kanaRowsByCategory,
 		type KanaScript
 	} from '$lib/kana/data.js';
 	import { KanaMastery, masteryLabel, progressKey } from '$lib/kana/progress.js';
+	import { cn } from '$lib/utils.js';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import Gamepad2Icon from '@lucide/svelte/icons/gamepad-2';
+	import Settings2Icon from '@lucide/svelte/icons/settings-2';
 	import ShuffleIcon from '@lucide/svelte/icons/shuffle';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
+	/** Shared with the selection dialog: a toggle there updates this page too. */
+	const availability = getKanaAvailability();
+	const enabled = $derived(availability.current?.enabled ?? data.enabled);
+
+	let selectionOpen = $state(false);
 	let script = $state<KanaScript>('hiragana');
 	let focusedByScript = $state<Record<KanaScript, string>>({ hiragana: 'あ', katakana: 'ア' });
 
@@ -42,6 +53,17 @@
 		current
 			? (progress[progressKey(script, current.id)]?.mastery ?? KanaMastery.New)
 			: KanaMastery.New
+	);
+
+	/** Yōon and extras are written with two characters, so they have no single stroke order. */
+	const currentCharacterLength = $derived(
+		current ? Array.from(kanaCharacter(current, script)).length : 0
+	);
+
+	const currentEnabled = $derived(current ? isKanaEnabled(enabled, script, current.id) : false);
+
+	const enabledCount = $derived(
+		scriptKana.filter((item) => isKanaEnabled(enabled, script, item.id)).length
 	);
 
 	const masteredCount = $derived(
@@ -78,6 +100,15 @@
 </script>
 
 {#snippet kanaPanel(targetScript: KanaScript)}
+	{@const panelKana = allKanaForScript(targetScript)}
+	{@const panelEnabled = panelKana.filter((item) =>
+		isKanaEnabled(enabled, targetScript, item.id)
+	).length}
+	{@const panelMastered = panelKana.filter(
+		(item) =>
+			(progress[progressKey(targetScript, item.id)]?.mastery ?? KanaMastery.New) ===
+			KanaMastery.Mastered
+	).length}
 	<Card.Root>
 		<Card.Header class="flex flex-row items-center justify-between gap-3">
 			<div class="flex min-w-0 flex-col gap-1">
@@ -86,45 +117,66 @@
 					{KANA_SCRIPTS.find((entry) => entry.id === targetScript)?.label}
 				</Card.Description>
 			</div>
-			<Badge variant="secondary">{masteredCount} dominados</Badge>
+			<div class="flex items-center gap-2">
+				<Badge variant="outline">{panelEnabled} activos</Badge>
+				<Badge variant="secondary">{panelMastered} dominados</Badge>
+			</div>
 		</Card.Header>
-		<Card.Content class="flex flex-col gap-3">
-			{#each KANA_ROWS as row (row.id)}
-				<div class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-2">
-					<span
-						class="flex h-16 items-center justify-center rounded-md border text-xs text-muted-foreground"
-					>
-						{row.label}
-					</span>
-					<div class="grid grid-cols-5 gap-2">
-						{#each row.kana as item (item.id)}
-							{@const character = kanaCharacter(item, targetScript)}
-							{@const isCurrent = focusedByScript[targetScript] === character}
-							{@const mastery =
-								progress[progressKey(targetScript, item.id)]?.mastery ?? KanaMastery.New}
-							<Button
-								variant={isCurrent ? 'secondary' : 'outline'}
-								class="h-16 min-w-0 flex-col gap-0 px-1 data-[current=true]:ring-2 data-[current=true]:ring-primary"
-								style="grid-column: {item.column + 1}"
-								data-current={isCurrent}
-								aria-current={isCurrent ? 'true' : undefined}
-								aria-label={`${character}, ${item.romaji}, ${masteryLabel(mastery)}`}
-								onclick={() => focusKana(targetScript, character)}
-							>
-								<span class="text-xl leading-none">{character}</span>
-								<span class="text-xs text-muted-foreground">{item.romaji}</span>
-								{#if mastery !== KanaMastery.New}
-									<span
-										class="mt-0.5 size-1.5 rounded-full {mastery === KanaMastery.Mastered
-											? 'bg-primary'
-											: 'bg-amber-400'}"
-										aria-hidden="true"
-									></span>
-								{/if}
-							</Button>
+		<Card.Content class="flex flex-col gap-5">
+			{#each KANA_CATEGORIES as category (category.id)}
+				{@const rows = kanaRowsByCategory(targetScript, category.id)}
+				{#if rows.length > 0}
+					<section class="flex flex-col gap-3">
+						<div class="flex flex-col gap-0.5">
+							<h3 class="text-sm font-medium">{category.label}</h3>
+							<p class="text-xs text-muted-foreground">{category.description}</p>
+						</div>
+						{#each rows as row (row.id)}
+							<div class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-2">
+								<span
+									class="flex h-16 items-center justify-center rounded-md border text-xs text-muted-foreground"
+								>
+									{row.label}
+								</span>
+								<div class={row.columnAligned ? 'grid grid-cols-5 gap-2' : 'flex flex-wrap gap-2'}>
+									{#each row.kana as item (item.id)}
+										{@const character = kanaCharacter(item, targetScript)}
+										{@const isCurrent = focusedByScript[targetScript] === character}
+										{@const mastery =
+											progress[progressKey(targetScript, item.id)]?.mastery ?? KanaMastery.New}
+										{@const kanaEnabled = isKanaEnabled(enabled, targetScript, item.id)}
+										<Button
+											variant={isCurrent ? 'secondary' : 'outline'}
+											class={cn(
+												'h-16 min-w-0 flex-col gap-0 px-1 data-[current=true]:ring-2 data-[current=true]:ring-primary',
+												!row.columnAligned && 'w-16',
+												!kanaEnabled && 'opacity-60',
+												kanaEnabled && 'border-primary/40'
+											)}
+											style={row.columnAligned ? `grid-column: ${item.column + 1}` : undefined}
+											data-current={isCurrent}
+											data-enabled={kanaEnabled}
+											aria-current={isCurrent ? 'true' : undefined}
+											aria-label={`${character}, ${item.romaji}, ${masteryLabel(mastery)}, ${kanaEnabled ? 'activo' : 'inactivo'}`}
+											onclick={() => focusKana(targetScript, character)}
+										>
+											<span class="text-xl leading-none">{character}</span>
+											<span class="text-xs text-muted-foreground">{item.romaji}</span>
+											{#if mastery !== KanaMastery.New}
+												<span
+													class="mt-0.5 size-1.5 rounded-full {mastery === KanaMastery.Mastered
+														? 'bg-primary'
+														: 'bg-amber-400'}"
+													aria-hidden="true"
+												></span>
+											{/if}
+										</Button>
+									{/each}
+								</div>
+							</div>
 						{/each}
-					</div>
-				</div>
+					</section>
+				{/if}
 			{/each}
 		</Card.Content>
 	</Card.Root>
@@ -156,7 +208,10 @@
 				<p class="text-sm text-muted-foreground">Silabarios básicos</p>
 			</div>
 			<div class="flex items-center gap-2">
-				<Badge variant="outline">{masteredCount} dominados</Badge>
+				<Button variant="outline" onclick={() => (selectionOpen = true)}>
+					<Settings2Icon data-icon="inline-start" />
+					Gestionar kana
+				</Button>
 				<Button href={resolve('/kana/lecciones')} variant="outline">
 					<BookOpenIcon data-icon="inline-start" />
 					Lecciones
@@ -191,25 +246,39 @@
 								{kanaCharacter(current, script)}
 							</Card.Title>
 							<Card.Description class="text-base">{current.romaji}</Card.Description>
-							<Badge variant="outline">{masteryLabel(currentMastery)}</Badge>
+							<div class="flex flex-wrap items-center justify-center gap-2">
+								<Badge variant="outline">{masteryLabel(currentMastery)}</Badge>
+								{#if currentEnabled}
+									<Badge variant="secondary">Activo</Badge>
+								{:else}
+									<Badge variant="outline" class="text-muted-foreground">Inactivo</Badge>
+								{/if}
+							</div>
 						</Card.Header>
 						<Card.Content class="mx-auto w-full max-w-72">
-							<Tabs.Root value="strokes">
-								<Tabs.List class="grid w-full grid-cols-2">
-									<Tabs.Trigger value="strokes">Ver trazos</Tabs.Trigger>
-									<Tabs.Trigger value="practice">Practicar</Tabs.Trigger>
-								</Tabs.List>
-								<Tabs.Content value="strokes">
-									{#key kanaCharacter(current, script)}
-										<KanaStrokeViewer character={kanaCharacter(current, script)} />
-									{/key}
-								</Tabs.Content>
-								<Tabs.Content value="practice">
-									{#key kanaCharacter(current, script)}
-										<KanaWritingPad character={kanaCharacter(current, script)} />
-									{/key}
-								</Tabs.Content>
-							</Tabs.Root>
+							{#if currentCharacterLength === 1}
+								<Tabs.Root value="strokes">
+									<Tabs.List class="grid w-full grid-cols-2">
+										<Tabs.Trigger value="strokes">Ver trazos</Tabs.Trigger>
+										<Tabs.Trigger value="practice">Practicar</Tabs.Trigger>
+									</Tabs.List>
+									<Tabs.Content value="strokes">
+										{#key kanaCharacter(current, script)}
+											<KanaStrokeViewer character={kanaCharacter(current, script)} />
+										{/key}
+									</Tabs.Content>
+									<Tabs.Content value="practice">
+										{#key kanaCharacter(current, script)}
+											<KanaWritingPad character={kanaCharacter(current, script)} />
+										{/key}
+									</Tabs.Content>
+								</Tabs.Root>
+							{:else}
+								<p class="py-6 text-center text-sm text-muted-foreground">
+									Este sonido se escribe con dos caracteres, así que no tiene un trazo único.
+									Practica sus componentes por separado.
+								</p>
+							{/if}
 						</Card.Content>
 						<Card.Footer class="grid grid-cols-3 gap-2">
 							<Button
@@ -251,3 +320,5 @@
 		</div>
 	</main>
 </div>
+
+<KanaSelectionDialog bind:open={selectionOpen} />

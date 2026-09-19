@@ -40,6 +40,8 @@
 		/** When set, plays a green/red result animation over the canvas. */
 		gradeAnimation?: 'correct' | 'incorrect' | null;
 		evaluationMode?: 'immediate' | 'deferred';
+		/** Grade the deferred drawing automatically once all strokes are drawn. */
+		autoCheck?: boolean;
 		oncomplete?: (result: CompletionResult) => void;
 		onfailed?: (result: CompletionResult) => void;
 	};
@@ -64,6 +66,7 @@
 		showCheckButton = true,
 		gradeAnimation = null,
 		evaluationMode = 'immediate',
+		autoCheck = false,
 		oncomplete,
 		onfailed
 	}: Props = $props();
@@ -589,6 +592,7 @@
 			if (points.length < 3 || polylineLength(points) < MIN_STROKE_LENGTH) return;
 			userStrokes = [...userStrokes, { id: nextStrokeId, points, accepted: null }];
 			nextStrokeId += 1;
+			if (autoCheck && userStrokes.length === data.strokes.length) checkDeferred();
 			return;
 		}
 

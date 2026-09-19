@@ -21,7 +21,7 @@
 	import { cn } from '$lib/utils.js';
 	import RefreshCcwIcon from '@lucide/svelte/icons/refresh-ccw';
 	import VolumeXIcon from '@lucide/svelte/icons/volume-x';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { Attachment } from 'svelte/attachments';
 
@@ -50,6 +50,11 @@
 	let { mode, pool, wordsByScript, onoutcome }: Props = $props();
 
 	const QUIZ_SECONDS = 10;
+	/** Questions per round, mirroring the lesson flow. */
+	const QUESTION_LIMIT = 16;
+	/** Pause after grading so the result is visible before advancing. */
+	const ADVANCE_CORRECT_MS = 1000;
+	const ADVANCE_WRONG_MS = 1600;
 	const info = $derived(modeInfo(mode));
 
 	/** Placeholder used before `onMount(newRound)` picks a real target. */
@@ -87,6 +92,13 @@
 	const pairCount = $derived(Math.min(6, pairPool.length));
 
 	let feedback = $state<Feedback | null>(null);
+	/** Number of questions already answered in this round. */
+	let answered = $state(0);
+	/** 1-based number of the question currently on screen. */
+	let questionNumber = $state(1);
+	let correctCount = $state(0);
+	let finished = $state(false);
+	let advanceTimer: ReturnType<typeof setTimeout> | undefined;
 
 	let quizTarget = $state<PracticeKana>(fallback);
 	let quizOptions = $state<PracticeKana[]>([]);
@@ -127,19 +139,25 @@
 		selectedFormationIds.flatMap((id) => formationTiles.filter((tile) => tile.id === id))
 	);
 
-	const isLocked = $derived(
-		(mode === 'quiz' && quizLocked) ||
-			(mode === 'listen' && listenLocked) ||
-			(mode === 'draw' && drawComplete) ||
-			(mode === 'word-choice' && wordLocked) ||
-			(mode === 'writing' && writingLocked) ||
-			(mode === 'formation' && formationLocked)
-	);
+	/**
+	 * Script of the current target, for the modes where the romaji alone is
+	 * ambiguous (drawing and writing). `null` for the mixed modes.
+	 */
+	const targetScript = $derived.by(() => {
+		if (mode === 'draw') return drawTarget.script;
+		if (mode === 'writing') return writingTarget.script;
+		return null;
+	});
 
-	function quizTimer(activeMode: PracticeMode, locked: boolean, serial: number): Attachment {
+	function quizTimer(
+		activeMode: PracticeMode,
+		locked: boolean,
+		serial: number,
+		isFinished: boolean
+	): Attachment {
 		return () => {
 			void serial;
-			if (activeMode !== 'quiz' || locked) return;
+			if (activeMode !== 'quiz' || locked || isFinished) return;
 
 			remaining = QUIZ_SECONDS;
 			const timer = window.setInterval(() => {
@@ -156,9 +174,42 @@
 		};
 	}
 
-	function recordOutcome(attempts: PracticeAttempt[], isCorrect: boolean, text: string) {
+	function clearAdvanceTimer() {
+		if (advanceTimer !== undefined) {
+			clearTimeout(advanceTimer);
+			advanceTimer = undefined;
+		}
+	}
+
+	/** Show the result, persist it and move on automatically. */
+	function recordOutcome(
+		attempts: PracticeAttempt[],
+		isCorrect: boolean,
+		text: string,
+		options: { advance?: boolean } = {}
+	) {
 		feedback = { kind: isCorrect ? 'correct' : 'wrong', text };
 		onoutcome({ attempts, correct: isCorrect });
+		correctCount += isCorrect ? 1 : 0;
+		answered += 1;
+		if (options.advance !== false) scheduleAdvance(isCorrect);
+	}
+
+	/** Advance to the next question, or finish the round after the limit. */
+	function scheduleAdvance(isCorrect: boolean) {
+		clearAdvanceTimer();
+		advanceTimer = setTimeout(
+			() => {
+				advanceTimer = undefined;
+				if (answered >= QUESTION_LIMIT) {
+					finished = true;
+					return;
+				}
+				questionNumber = answered + 1;
+				newRound();
+			},
+			isCorrect ? ADVANCE_CORRECT_MS : ADVANCE_WRONG_MS
+		);
 	}
 
 	/** Attempts for a single kana item. */
@@ -213,7 +264,7 @@
 	}
 
 	function finishQuizTimeout() {
-		if (quizLocked || mode !== 'quiz') return;
+		if (quizLocked || finished || mode !== 'quiz') return;
 		quizLocked = true;
 		recordOutcome(attemptFor(quizTarget), false, 'Se acabó el tiempo. Avanza cuando estés listo.');
 	}
@@ -253,8 +304,13 @@
 	}
 
 	function failDrawing() {
-		feedback = null;
-		onoutcome({ attempts: attemptFor(drawTarget), correct: false });
+		if (drawComplete) return;
+		drawComplete = true;
+		recordOutcome(
+			attemptFor(drawTarget),
+			false,
+			'El trazo no coincide. Revisa el orden y la forma.'
+		);
 	}
 
 	/** Pick a script that actually has words available. */
@@ -309,17 +365,36 @@
 		const isMatch = selectedPairKana === selectedPairRomaji;
 		if (isMatch) matchedPairs.add(selectedPairKana);
 		const matched = pairPool.find((item) => item.key === selectedPairKana);
+		const boardComplete = matchedPairs.size === pairCount;
 		recordOutcome(
 			matched ? attemptFor(matched) : [],
 			isMatch,
 			isMatch
-				? matchedPairs.size === pairCount
+				? boardComplete
 					? `Ronda completada: ${pairCount} de ${pairCount} pares.`
 					: `Pareja correcta: ${matchedPairs.size} de ${pairCount}.`
-				: 'No forman pareja. Prueba otra combinación.'
+				: 'No forman pareja. Prueba otra combinación.',
+			{ advance: false }
 		);
 		selectedPairKana = null;
 		selectedPairRomaji = null;
+
+		// Pairs are matched on a board, so the round only advances once the
+		// board is cleared (or the question limit is reached).
+		if (answered >= QUESTION_LIMIT) {
+			clearAdvanceTimer();
+			advanceTimer = setTimeout(() => {
+				advanceTimer = undefined;
+				finished = true;
+			}, ADVANCE_CORRECT_MS);
+		} else if (boardComplete) {
+			clearAdvanceTimer();
+			advanceTimer = setTimeout(() => {
+				advanceTimer = undefined;
+				questionNumber = answered + 1;
+				newPairs();
+			}, ADVANCE_CORRECT_MS);
+		}
 	}
 
 	function newWriting() {
@@ -391,6 +466,8 @@
 	}
 
 	function newRound() {
+		clearAdvanceTimer();
+		feedback = null;
 		switch (mode) {
 			case 'quiz':
 				newQuiz();
@@ -415,31 +492,54 @@
 		}
 	}
 
+	/** Reset the counters and start a fresh round. */
+	function restartRound() {
+		clearAdvanceTimer();
+		answered = 0;
+		questionNumber = 1;
+		correctCount = 0;
+		finished = false;
+		newRound();
+	}
+
 	// The parent remounts this component (via `{#key}`) whenever the mode or
 	// pool changes, so a single mount-time round is enough.
 	onMount(newRound);
+	onDestroy(clearAdvanceTimer);
 </script>
 
 <Card.Root class="mx-auto w-full max-w-3xl">
 	<Card.Header class="gap-1">
 		<div class="flex items-center justify-between gap-3">
-			<Card.Title>{info.label}</Card.Title>
-			{#if mode === 'draw' || mode === 'writing'}
+			<Card.Title>{finished ? 'Ronda completada' : info.label}</Card.Title>
+			{#if finished}
+				<Badge variant="secondary">{correctCount} / {QUESTION_LIMIT}</Badge>
+			{:else if targetScript}
 				<Badge variant="secondary">
-					{drawTarget.script === 'hiragana' ? 'Hiragana' : 'Katakana'}
+					{targetScript === 'hiragana' ? 'Hiragana' : 'Katakana'}
 				</Badge>
 			{:else}
 				<Badge variant="outline">Hiragana + Katakana</Badge>
 			{/if}
 		</div>
-		<Card.Description>{info.description}</Card.Description>
+		<Card.Description>
+			{finished ? `Acertaste ${correctCount} de ${QUESTION_LIMIT} preguntas.` : info.description}
+		</Card.Description>
 	</Card.Header>
 
 	<Card.Content
 		class="flex min-h-80 flex-col justify-center gap-6"
-		{@attach quizTimer(mode, quizLocked, quizSerial)}
+		{@attach quizTimer(mode, quizLocked, quizSerial, finished)}
 	>
-		{#if mode === 'quiz'}
+		{#if finished}
+			<div class="flex flex-col items-center gap-4 py-6 text-center">
+				<p class="text-5xl font-semibold tabular-nums">{correctCount} / {QUESTION_LIMIT}</p>
+				<Button onclick={restartRound}>
+					<RefreshCcwIcon data-icon="inline-start" />
+					Nueva ronda
+				</Button>
+			</div>
+		{:else if mode === 'quiz'}
 			<div class="flex flex-col gap-2">
 				<div class="flex items-center justify-between text-sm tabular-nums">
 					<span class="text-muted-foreground">Tiempo restante</span>
@@ -504,6 +604,13 @@
 							character={kanaCharacter(drawTarget.kana, drawTarget.script)}
 							showGuide={false}
 							showIndicators={false}
+							showCheckButton={false}
+							autoCheck
+							gradeAnimation={feedback?.kind === 'correct'
+								? 'correct'
+								: feedback?.kind === 'wrong'
+									? 'incorrect'
+									: null}
 							evaluationMode="deferred"
 							oncomplete={finishDrawing}
 							onfailed={failDrawing}
@@ -564,8 +671,13 @@
 				</div>
 			</div>
 		{:else if mode === 'writing'}
-			<div class="text-center text-6xl font-medium">
-				{kanaCharacter(writingTarget.kana, writingTarget.script)}
+			<div class="flex flex-col items-center gap-2 text-center">
+				<div class="text-6xl font-medium">
+					{kanaCharacter(writingTarget.kana, writingTarget.script)}
+				</div>
+				<Badge variant="outline">
+					{writingTarget.script === 'hiragana' ? 'Hiragana' : 'Katakana'}
+				</Badge>
 			</div>
 			<form class="mx-auto flex w-full max-w-md flex-col gap-3" onsubmit={submitWriting}>
 				<label for="romaji-answer" class="text-sm font-medium">Romaji</label>
@@ -630,23 +742,22 @@
 		{/if}
 	</Card.Content>
 
-	<Card.Footer class="flex min-h-14 flex-wrap items-center justify-between gap-3 border-t">
-		<p
-			class={cn(
-				'text-sm',
-				feedback?.kind === 'correct' && 'font-medium text-primary',
-				feedback?.kind === 'wrong' && 'font-medium text-destructive',
-				(!feedback || feedback.kind === 'info') && 'text-muted-foreground'
-			)}
-			aria-live="polite"
-		>
-			{feedback?.text ?? (mode === 'draw' ? '' : 'Completa el ejercicio para ver el resultado.')}
-		</p>
-		{#if isLocked}
-			<Button onclick={newRound}>
-				<RefreshCcwIcon data-icon="inline-start" />
-				Siguiente
-			</Button>
-		{/if}
-	</Card.Footer>
+	{#if !finished}
+		<Card.Footer class="flex min-h-14 flex-wrap items-center justify-between gap-3 border-t">
+			<p
+				class={cn(
+					'text-sm',
+					feedback?.kind === 'correct' && 'font-medium text-primary',
+					feedback?.kind === 'wrong' && 'font-medium text-destructive',
+					(!feedback || feedback.kind === 'info') && 'text-muted-foreground'
+				)}
+				aria-live="polite"
+			>
+				{feedback?.text ?? (mode === 'draw' ? '' : 'Completa el ejercicio para ver el resultado.')}
+			</p>
+			<span class="text-xs text-muted-foreground tabular-nums">
+				Pregunta {questionNumber} de {QUESTION_LIMIT}
+			</span>
+		</Card.Footer>
+	{/if}
 </Card.Root>
